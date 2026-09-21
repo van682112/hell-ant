@@ -1,0 +1,1559 @@
+<title>地獄蟻漫步</title>
+<style>
+:root {
+  --panel: #161b22;
+  --line: #30363d;
+  --text: #e6edf3;
+  --dim: #8b949e;
+  --accent: #58a6ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0d1117;
+  color: var(--text);
+  font: 13px/1.5 "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+
+/* 面板是固定定位的覆蓋層，畫布只占它右邊那塊，
+   否則視窗窄的時候模型會被算在整個視窗的中心、躲到面板後面 */
+canvas {
+  display: block;
+  position: fixed;
+  top: 0;
+  right: 0;
+}
+
+#panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 276px;
+  height: 100%;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(8px);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+#panel header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+#panel .sub { margin: 2px 0 0; color: var(--dim); font-size: 11px; }
+
+#panel h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+#panel section { display: flex; flex-direction: column; gap: 6px; }
+[hidden] { display: none !important; }
+
+label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+label.dial {
+  display: grid;
+  gap: 2px;
+  cursor: default;
+  margin-top: 4px;
+}
+label.dial span { display: flex; justify-content: space-between; font-size: 12px; }
+label.dial small { color: var(--dim); font-size: 10px; }
+label.dial.grow { flex: 1; }
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: #21262d;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+
+.row { display: flex; gap: 10px; align-items: flex-end; }
+
+input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+output { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+#panel footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--dim);
+}
+#fps { font-variant-numeric: tabular-nums; }
+.dim { color: var(--dim); }
+#panel footer a { color: var(--accent); text-decoration: none; }
+#panel footer a:hover { text-decoration: underline; }
+
+#status {
+  position: fixed;
+  left: calc(50% + 138px);
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: #21262d;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+#status.show { opacity: 1; }
+#status.error { border-color: #f85149; color: #ff7b72; }
+
+/* ---------------------------------------------------------------- 虛擬方向鍵
+   放在畫布右下角。用 grid 排成十字，按住時整顆變亮。
+   touch-action: none 是必要的 —— 不然手指按住拖曳會被瀏覽器當成捲動，
+   pointerup 收不到，螞蟻就會一直走。 */
+#dpad {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  grid-template-rows: repeat(3, 56px);
+  gap: 6px;
+  z-index: 5;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#dpad[hidden] { display: none; }
+
+.dpad-btn {
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(22, 27, 34, 0.78);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 90ms, border-color 90ms;
+}
+.dpad-btn:hover { background: rgba(48, 54, 61, 0.85); }
+.dpad-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0d1117;
+}
+
+.dpad-btn.up    { grid-area: 1 / 2; }
+.dpad-btn.left  { grid-area: 2 / 1; }
+.dpad-btn.right { grid-area: 2 / 3; }
+.dpad-btn.down  { grid-area: 3 / 2; }
+
+/* 窄螢幕：按鈕放大一點、往內縮，手指比較好按 */
+@media (max-width: 700px) {
+  #dpad {
+    right: 12px;
+    bottom: 12px;
+    grid-template-columns: repeat(3, 64px);
+    grid-template-rows: repeat(3, 64px);
+  }
+  .dpad-btn { width: 64px; height: 64px; font-size: 26px; }
+}
+
+/* ---------------------------------------------------------------- 面板收合
+   手機上 276px 的面板會蓋掉大半畫面，所以要能收起來。
+   收合時 #panel 直接 display:none —— viewSize() 讀的是 panel.offsetWidth，
+   變 0 之後畫布就自動吃滿整個視窗（切換時要手動呼叫一次 resize 流程）。 */
+#panel-toggle {
+  position: fixed;
+  top: 12px;
+  left: 288px;
+  z-index: 6;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(22, 27, 34, 0.86);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: left 140ms ease, background 90ms;
+}
+#panel-toggle:hover { background: rgba(48, 54, 61, 0.9); }
+
+body.panel-hidden #panel { display: none; }
+body.panel-hidden #panel-toggle { left: 12px; }
+
+@media (max-width: 700px) {
+  /* 窄螢幕預設就收起來，讓螞蟻佔滿畫面；要調參數再按 ☰ 打開 */
+  #panel { width: min(276px, 86vw); }
+  #panel-toggle { top: 10px; left: 10px; }
+  body:not(.panel-hidden) #panel-toggle { left: calc(min(276px, 86vw) + 12px); }
+}
+
+
+/* ---------------------------------------------------------------- 開場提示 */
+#hint {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 7;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  max-width: min(420px, calc(100vw - 32px)); padding: 14px 18px; text-align: center;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: rgba(22, 27, 34, 0.92); backdrop-filter: blur(8px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+#hint strong { font-size: 14px; font-weight: 600; }
+#hint span { color: var(--dim); font-size: 12px; }
+#hint button {
+  margin-top: 4px; padding: 6px 16px; border: 1px solid var(--accent);
+  border-radius: 8px; background: transparent; color: var(--accent);
+  font: inherit; cursor: pointer;
+}
+#hint button:hover { background: var(--accent); color: #0d1117; }
+@media (max-width: 700px) { #hint { bottom: 210px; } }
+
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
+
+    <aside id="panel">
+      <header>
+        <h1>地獄蟻 — 平面風上色</h1>
+        <p class="sub">three.js r180 · 雙色調 Emission 重建</p>
+      </header>
+
+      <section>
+        <h2>模型</h2>
+        <label><input type="radio" name="model" value="rt" checked /> 即時描邊（像素鎖定）</label>
+        <label><input type="radio" name="model" value="walk" /> 無描邊</label>
+        <label class="dial" id="opx-row">
+          <span>描邊寬度 <output id="opx-out">3.0</output></span>
+          <input id="opx" type="range" min="0" max="10" step="0.1" value="3" />
+          <small>像素．與 Blender 的 TARGET_PX 同值（3.0）</small>
+        </label>
+      </section>
+
+      <section>
+        <h2>著色</h2>
+        <label><input type="radio" name="shade" value="two" checked /> 雙色調（相機相對）</label>
+        <label><input type="radio" name="shade" value="flat" /> 單色平面（只用亮面色）</label>
+        <label><input type="radio" name="shade" value="lit" /> 單色 + 頂光（形體測試）</label>
+        <div id="thr-row" hidden>
+          <label class="dial">
+            <span>視線權重 <output id="vw-out">0.62</output></span>
+            <input id="vw" type="range" min="0" max="1" step="0.01" value="0.62" />
+            <small>Blender 的 SCALE 節點．0.00 = 純太陽 ／ 1.00 = 視線主導</small>
+          </label>
+          <label class="dial">
+            <span>明暗分界 <output id="thr-out">0.00</output></span>
+            <input id="thr" type="range" min="-1" max="1" step="0.01" value="0" />
+            <small>dot(法線, 混合方向) 的門檻．Blender 用 0.00</small>
+          </label>
+        </div>
+      </section>
+
+      <section id="lightdir-section" hidden>
+        <h2>光源方向</h2>
+        <label class="dial">
+          <span>光源仰角 <output id="elev-out">30°</output></span>
+          <input id="elev" type="range" min="0" max="90" step="1" value="30" />
+          <small>滿刻度 0°（水平）～ 90°（正頭頂）．Blender 的太陽是 30°</small>
+        </label>
+        <label class="dial">
+          <span>光源方位 <output id="azim-out">30°</output></span>
+          <input id="azim" type="range" min="0" max="360" step="1" value="30" />
+          <small>滿刻度 0～360°．仰角 30° + 方位 30° = Blender 的 PreviewSun</small>
+        </label>
+      </section>
+
+      <section id="shadow-section" hidden>
+        <h2>陰影</h2>
+        <label><input type="checkbox" id="shadow-on" checked /> 投射陰影</label>
+        <label><input type="checkbox" id="ground-on" checked /> 地面接影（平塗兩色，對齊 Blender §6.4）</label>
+        <label class="dial">
+          <span>陰影強度 <output id="shadow-out">1.00</output></span>
+          <input id="shadow" type="range" min="0" max="1" step="0.01" value="1" />
+          <small>1.00 = 地面陰影色為受光色 × 0.60（Blender 的值）；0.00 = 看不見</small>
+        </label>
+      </section>
+
+      <section id="band-section" hidden>
+        <h2>腹部條紋</h2>
+        <label class="dial">
+          <span>條紋數 <output id="bn-out">3.0</output></span>
+          <input id="bn" type="range" min="0" max="8" step="0.5" value="3" />
+          <small>0 = 關閉．讀 COLOR_0.r（腹部軸向座標）</small>
+        </label>
+        <label class="dial">
+          <span>暗帶寬度 <output id="bw-out">0.60</output></span>
+          <input id="bw" type="range" min="0" max="1" step="0.01" value="0.6" />
+          <small>佔一個週期的比例</small>
+        </label>
+        <label class="dial">
+          <span>暗化係數 <output id="bk-out">0.62</output></span>
+          <input id="bk" type="range" min="0.2" max="1" step="0.01" value="0.62" />
+          <small>1.00 = 不變暗．是乘法，不是換色</small>
+        </label>
+      </section>
+
+      <section id="eye-section" hidden>
+        <h2>眼睛高光</h2>
+        <label class="dial">
+          <span>高光半徑 <output id="hir-out">0.01275</output></span>
+          <input id="hir" type="range" min="0" max="0.03" step="0.00025" value="0.01275" />
+          <small>世界單位．半長軸是 0.050468，Blender 用 0.01275</small>
+        </label>
+        <label class="dial">
+          <span>邊緣柔度 <output id="hiw-out">0.00140</output></span>
+          <input id="hiw" type="range" min="0" max="0.006" step="0.0001" value="0.0014" />
+          <small>0 = 硬邊．Blender 用 0.0014</small>
+        </label>
+        <small>解析反射點：由半向量解出反射點在眼睛平面的座標，再量距離 —— 不是 Blinn-Phong</small>
+        <label><input type="checkbox" id="rim-on" checked /> 眼圈（材質畫的線）</label>
+        <label class="dial">
+          <span>眼圈寬度 <output id="rimw-out">0.0040</output></span>
+          <input id="rimw" type="range" min="0" max="0.01" step="0.0002" value="0.004" />
+          <small>頭那一側的寬度；眼睛內側自動取 0.375 倍．讀 COLOR_0.g</small>
+        </label>
+      </section>
+
+      <section id="lit-section">
+        <h2>頂光設定</h2>
+        <label class="dial">
+          <span>全身底色 <output id="base-out">#8A7150</output></span>
+          <input id="base" type="color" value="#8A7150" />
+          <small>眼睛保留 #311F11，一樣受光，另有高光</small>
+        </label>
+        <label class="dial">
+          <span>環境補光 <output id="amb-out">0.15</output></span>
+          <input id="amb" type="range" min="0" max="1" step="0.01" value="0.15" />
+          <small>0.00 = 背光面全黑 ／ 1.00 = 完全無明暗</small>
+        </label>
+        <label class="dial">
+          <span>眼睛高光強度 <output id="spec-out">0.35</output></span>
+          <input id="spec" type="range" min="0" max="1" step="0.01" value="0.35" />
+          <small>滿刻度 0.00（無反光）～ 1.00（純白亮點）</small>
+        </label>
+        <label class="dial">
+          <span>眼睛高光銳度 <output id="shin-out">128</output></span>
+          <input id="shin" type="range" min="2" max="256" step="1" value="128" />
+          <small>滿刻度 2（大片霧面）～ 256（小點鏡面）</small>
+        </label>
+      </section>
+
+      <section>
+        <h2>動畫</h2>
+        <label><input type="checkbox" id="fix-offset" checked /> 修正開頭 1/24 s 空白</label>
+        <label><input type="checkbox" id="in-place" checked /> 原地走（拔掉 Root 位移）</label>
+        <label><input type="checkbox" id="keys" checked /> 方向鍵操控（↑↓ 前後　←→ 轉向）</label>
+        <label class="dial" id="turn-row" hidden>
+          <span>轉向速度 <output id="turn-out">90°/s</output></span>
+          <input id="turn" type="range" min="15" max="270" step="5" value="90" />
+          <small>按住 ← → 的角速度．前進速度固定跟著「一次循環」換算，腳不會打滑</small>
+        </label>
+        <label><input type="checkbox" id="advance" checked /> 自己推進（不彈回）</label>
+        <label class="dial" id="laps-row">
+          <span>走多遠才重複 <output id="laps-out">6 圈 · 2.62 單位</output></span>
+          <input id="laps" type="range" min="1" max="30" step="1" value="6" />
+          <small>每圈 0.436364 單位（體長 1.7069 的 25.6%）．走滿後位置歸零，動作不中斷</small>
+        </label>
+        <label><input type="checkbox" id="follow" checked /> 相機跟著走</label>
+        <div class="row">
+          <button id="play">暫停</button>
+          <label class="dial grow">
+            <span>一次循環 <output id="cycle-out">1.00 s</output></span>
+            <input id="cycle" type="range" min="0.2" max="10" step="0.05" value="1" />
+            <small>滿刻度 0.20 ～ 10.00 秒．原始 clip 為 0.666667 s</small>
+          </label>
+        </div>
+        <output id="time-out">—</output>
+      </section>
+
+      <section>
+        <h2>場景</h2>
+        <label><input type="checkbox" id="front" checked /> 單面渲染（剔除背面）</label>
+        <label><input type="checkbox" id="hi" /> 眼睛反光片（Ant_Hi 白片）</label>
+        <label><input type="checkbox" id="bg-ref" checked /> 參考背景 #CFC9BC</label>
+        <label><input type="checkbox" id="face-cam" /> 轉 180° 面向鏡頭（會把光相對螞蟻的方位翻到另一邊）</label>
+        <label><input type="checkbox" id="ortho" /> 正交投影</label>
+        <label><input type="checkbox" id="rot" /> 自動旋轉</label>
+      </section>
+
+      <footer>
+        <span id="fps">–</span>
+        <span class="dim">左鍵旋轉 · 右鍵平移 · 滾輪縮放</span>
+        <span class="dim">Blender → glTF → three.js</span>
+      </footer>
+    </aside>
+
+    <button type="button" id="panel-toggle" aria-label="收合面板" aria-expanded="true">☰</button>
+
+    <!-- 虛擬方向鍵：觸控裝置沒有實體方向鍵，而且不必先點畫面取得焦點 -->
+    <div id="dpad" hidden>
+      <button type="button" class="dpad-btn up"    data-key="ArrowUp"    aria-label="前進">↑</button>
+      <button type="button" class="dpad-btn left"  data-key="ArrowLeft"  aria-label="左轉">←</button>
+      <button type="button" class="dpad-btn right" data-key="ArrowRight" aria-label="右轉">→</button>
+      <button type="button" class="dpad-btn down"  data-key="ArrowDown"  aria-label="後退">↓</button>
+    </div>
+
+    <div id="hint">
+      <strong>用方向鍵或右下角的十字鍵走動</strong>
+      <span>↑↓ 前進後退　←→ 轉向　·　左鍵拖曳環繞　滾輪縮放</span>
+      <button type="button" id="hint-close">知道了</button>
+    </div>
+
+    <div id="status"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+// ================================================================
+// 來源：kurzgesagt/blender/gltf/README.md
+// 原始材質是 Emission + NEW_GEOMETRY 相機相對兩色調，glTF 只支援 PBR，
+// 程序式的部分完全沒匯出（6 個材質變成全白）。這裡照材質名稱接回去。
+// ================================================================
+
+const BASE = './';
+const MODELS = {
+  rt: BASE + 'hell_ant_walk.glb',     // 乾淨網格 + 即時描邊（像素鎖定）
+  walk: BASE + 'hell_ant_walk.glb',   // 乾淨網格，不描邊
+};
+
+// ---------------------------------------------------------------- 即時描邊
+// Blender 的反向外殼是「沿法線外推 thickness（世界單位）」，鏡頭推近線就變粗。
+// 這裡改成在頂點著色器裡外推「固定像素數」換算出來的世界長度：
+//   每像素的世界長度 = 2 * 視深 * tan(fov/2) / 視埠高   （正交相機則是定值）
+// 每頂點再乘上 COLOR_0.b（= Blender 的 HullW，避免高曲率處自我穿插）。
+const OUTLINE_VERT = /* glsl */ `
+  #include <common>
+  #include <color_pars_vertex>
+  #include <skinning_pars_vertex>
+  uniform float uOutlinePx;
+  uniform float uPxScale;     // PERSP: 2*tan(vfov/2)/viewportH   ORTHO: (top-bottom)/viewportH
+  uniform float uOrtho;       // 1 = 正交
+  void main() {
+    #include <color_vertex>
+    #include <beginnormal_vertex>
+    #include <skinbase_vertex>
+    #include <skinnormal_vertex>
+    #include <defaultnormal_vertex>
+    #include <begin_vertex>
+    #include <skinning_vertex>
+    vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+    vec3 nv = normalize(normalMatrix * objectNormal);
+    float unitsPerPx = mix(-mv.z * uPxScale, uPxScale, uOrtho);
+    #if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )
+      float hw = vColor.b;
+    #else
+      float hw = 1.0;
+    #endif
+    mv.xyz += nv * (uOutlinePx * unitsPerPx * hw);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const OUTLINE_FRAG = /* glsl */ `
+  uniform vec3 uOutlineColor;
+  void main() {
+    gl_FragColor = vec4(uOutlineColor, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+// [亮面, 暗面] — 暗面由「表面法線 · 相機向量」切換
+const PALETTE = {
+  AntT_Head:     ['#5A4830', '#463824'],
+  AntT_Mandible: ['#5A4830', '#4A3B26'],
+  AntT_Thorax:   ['#5A4230', '#463324'],
+  AntT_Gaster:   ['#664E30', '#47351F'],
+  AntT_Antenna:  ['#483624', '#3B2B1C'],
+  AntT_Leg:      ['#483624', '#3B2B1C'],
+  Ant_Eye:       ['#311F11', '#311F11'],
+  Ant_Hi:        ['#E3D7C7', '#E3D7C7'],
+  Ant_Outline:   ['#302010', '#302010'],
+};
+const WORLD_BG = '#CFC9BC';
+const FALLBACK = ['#FF00FF', '#AA00AA']; // 沒對到名字的材質，故意刺眼
+
+const FPS = 24;
+const ROOT_TRACK = 'Root.position';
+// 每個走路循環的前進距離（Blender 量測：Root 骨每 16 格累積 0.436364 單位）
+const STRIDE_PER_CYCLE = 0.436364;
+
+// ---------------------------------------------------------------- 著色器
+
+// 平面風的重點是「顏色就是指定的顏色」，所以走 unlit：不吃燈光、不吃 IBL。
+// 頂點著色器沿用 three 內建的 skinning chunk，蒙皮才會跟著骨架動。
+// chunk 順序比照 three 內建的 ShadowMaterial（shadow_vert.glsl.js），
+// shadowmap_vertex 需要 worldpos_vertex 先算出 worldPosition。
+const VERT = /* glsl */ `
+  #include <common>
+  #include <color_pars_vertex>
+  #include <skinning_pars_vertex>
+  #include <shadowmap_pars_vertex>
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vNW;
+  varying vec3 vWP;
+  varying vec3 vOP;
+  attribute vec2 uv1;          // = glTF 的 TEXCOORD_1（EyeUV，靜置姿勢的眼睛座標）
+  varying vec2 vEyeUV;
+  void main() {
+    #include <color_vertex>
+    #include <beginnormal_vertex>
+    #include <skinbase_vertex>
+    #include <skinnormal_vertex>
+    vNW = normalize(mat3(modelMatrix) * objectNormal);  // 世界空間法線（蒙皮後）
+    #include <defaultnormal_vertex>
+    #include <begin_vertex>
+    #include <skinning_vertex>
+    vEyeUV = uv1;
+    vOP = transformed;                                  // 物件空間位置（蒙皮後）
+    vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;   // 世界空間位置（蒙皮後）
+    #include <project_vertex>
+    #include <worldpos_vertex>
+    #include <shadowmap_vertex>
+    vN = normalize(transformedNormal);   // 視空間法線
+    vV = normalize(-mvPosition.xyz);     // 視空間視線方向
+  }
+`;
+
+// uMode：0 = 單色平面，1 = 雙色調（相機相對），2 = 單色 + 頂光（Lambert）
+const FRAG = /* glsl */ `
+  #include <common>
+  #include <packing>
+  #include <bsdfs>
+  #include <lights_pars_begin>
+  #include <shadowmap_pars_fragment>
+  #include <shadowmask_pars_fragment>
+  #include <color_pars_fragment>
+  // three 只在材質開了 vertexColors 時才宣告 vColor（COLOR_0 是 VEC4 -> USE_COLOR_ALPHA）。
+  // 沒有這個保護的話，其他材質會編譯失敗：'vColor' : undeclared identifier
+  #if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )
+    #define HAS_VCOLOR 1
+  #endif
+  uniform vec3  uLight;
+  uniform vec3  uDark;
+  uniform vec3  uBase;
+  uniform vec3  uLightDir;
+  uniform float uThreshold;
+  uniform float uAmbient;
+  uniform float uMode;
+  uniform float uKeepOwnColor;
+  uniform float uUnlit;
+  uniform float uSpecular;
+  uniform float uShininess;
+  uniform float uShadow;
+  uniform float uViewWeight;
+  uniform float uBandN;
+  uniform float uBandW;
+  uniform float uBandK;
+  uniform float uUseBands;
+  // 眼睛解析高光（從 Blender 的 Ant_Eye 節點群搬過來，常數已轉成 Y-up）
+  uniform float uEyeHi;
+  uniform vec3  uEyeC;
+  uniform vec3  uEyeU;
+  uniform vec3  uEyeV;
+  uniform vec3  uEyeN;
+  uniform vec3  uHiColor;
+  uniform vec3  uCamObj;      // 相機位置（物件空間）
+  uniform vec3  uLightObj;    // 光方向（物件空間）
+  uniform float uKU;
+  uniform float uKV;
+  uniform float uEyeA;
+  uniform float uEyeB;
+  uniform float uQmax;
+  uniform float uHiR;
+  uniform float uHiW;
+  // 眼圈（材質畫的線，反向外殼畫不出來 —— 它只在剪影出現）
+  uniform float uUseRim;
+  uniform float uRimW;
+  uniform float uRimS;
+  uniform float uRimScale;
+  uniform vec3  uRimColor;
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vNW;
+  varying vec3 vWP;
+  varying vec3 vOP;
+  varying vec2 vEyeUV;
+  uniform float uEyeSU;        // EyeUV 的壓縮倍率（Blender 烘的時候用 4.0）
+
+  // Blender 的做法:把眼睛當成一個解析圓頂,用半向量 H 直接「解」出反射點在
+  // 眼睛平面上的座標 (u*, v*),再量該像素離那個點多遠 —— 不是 Blinn-Phong。
+  // 兩顆眼睛共用同一組常數,靠 x 的鏡射處理左右。
+  vec3 eyeHighlight(vec3 base) {
+    float sx = sign(vOP.x);
+    // u, v 改從 EyeUV 讀 —— 那是「靜置姿勢」烘死的逐頂點座標。
+    // 原本用「蒙皮後的位置 − 固定的中心 C」去算，螞蟻一走整隻位移，
+    // 眼睛就從那個固定框架滑出去（實測位移達 7 個半長軸），高光因此亂跑。
+    float u = (vEyeUV.x * 2.0 - 1.0) * uEyeSU * uEyeA;
+    float v = (vEyeUV.y * 2.0 - 1.0) * uEyeSU * uEyeB;
+
+    vec3 I = normalize(uCamObj - vOP);              // = Blender 的 Incoming
+    vec3 H = normalize(normalize(uLightObj) + I);
+    vec3 Hm = vec3(H.x * sx, H.y, H.z);             // 鏡到 +X 空間
+    float hu = dot(Hm, uEyeU);
+    float hv = dot(Hm, uEyeV);
+    float hn = max(dot(Hm, uEyeN), 0.05);
+
+    float us = (hu / hn) / uKU;                     // 反射點
+    float vs = (hv / hn) / uKV;
+    float qu = us / uEyeA, qv = vs / uEyeB;
+    float q  = sqrt(qu * qu + qv * qv);
+    float sc = min(1.0, uQmax / max(q, 1e-6));      // 夾在眼睛內
+    float dist = length(vec2(u - us * sc, v - vs * sc));
+
+    float hi = 1.0 - smoothstep(uHiR - uHiW, uHiR + uHiW, dist);
+    return mix(base, uHiColor, hi);
+  }
+
+  void main() {
+    vec3 col;
+    if (uMode > 1.5 && uUnlit > 0.5) {
+      // 描邊外殼是輪廓不是表面，任何模式都維持純色、不受光。
+      // 讓它吃光會在整隻螞蟻外面糊出一層受光的殼，看起來像半透明外骨骼。
+      col = uLight;
+    } else if (uMode > 1.5) {
+      // 無限遠平行光：光線互相平行，只有方向沒有位置
+      vec3 nw = normalize(vNW);
+      if (!gl_FrontFacing) nw = -nw;
+      vec3 L = normalize(uLightDir);
+      float ndl = max(dot(nw, L), 0.0);
+
+      // getShadowMask()：1.0 = 完全受光，0.0 = 完全在陰影裡。
+      // 用 uShadow 調強度，陰影只壓到環境補光的水平，不會變全黑。
+      ndl *= mix(1.0, getShadowMask(), uShadow);
+
+      if (uKeepOwnColor > 0.5) {
+        // 眼睛：保留原色 + Blinn-Phong 高光。高光位置由光向量與視線共同決定，
+        // 所以轉光源時亮點會在眼球上移動。
+        vec3 V = normalize(cameraPosition - vWP);
+        vec3 H = normalize(L + V);
+        float spec = pow(max(dot(nw, H), 0.0), uShininess) * uSpecular;
+        col = uLight * (uAmbient + (1.0 - uAmbient) * ndl) + vec3(spec);
+      } else {
+        col = uBase * (uAmbient + (1.0 - uAmbient) * ndl);
+      }
+    } else if (uMode > 0.5) {
+      // 雙色調 —— 跟 Blender 對齊的版本。
+      // Blender: dir = normalize(Incoming * SCALE + L)，Incoming 是「表面 -> 相機」，
+      //          lit = dot(Normal, dir) > 0，Mix 的 A=暗 B=亮。
+      // 全部在世界空間算，因為 L 是世界空間的太陽方向。
+      vec3 nw = normalize(vNW);
+      if (!gl_FrontFacing) nw = -nw;
+      vec3 I = normalize(cameraPosition - vWP);        // = Blender 的 Incoming
+      vec3 dir = normalize(I * uViewWeight + normalize(uLightDir));
+      float lit = step(uThreshold, dot(nw, dir));
+      col = mix(uDark, uLight, lit);
+      if (uEyeHi > 0.5) col = eyeHighlight(uLight);   // 眼睛:底色固定,不吃兩色調
+      // 眼圈:COLOR_0.g 存的是「到眼睛島嶼邊界的距離 / uRimScale」。
+      // 線要跨過邊界,所以頭與眼睛兩邊都畫,各自給不同寬度。
+      #ifdef HAS_VCOLOR
+      if (uUseRim > 0.5) {
+        float dr = vColor.g * uRimScale;
+        float rim = 1.0 - smoothstep(uRimW - uRimS, uRimW + uRimS, dr);
+        col = mix(col, uRimColor, rim);
+      }
+      #endif
+    } else {
+      col = uLight;                                     // 單色平面
+    }
+
+    // 腹部條紋:COLOR_0.r 存的是腹部沿長軸的正規化座標(Blender 的 GasterAxis)。
+    // 用乘法壓暗而不是換色,兩色調與太陽方向才能在條紋底下繼續作用。
+    #ifdef HAS_VCOLOR
+    if (uUseBands > 0.5 && uBandN > 0.0) {
+      float band = step(fract(vColor.r * uBandN), uBandW);
+      col *= mix(1.0, uBandK, band);
+    }
+    #endif
+    gl_FragColor = vec4(col, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+// 頂光模式下要保留原色的材質（眼睛：原色 + 受光 + 高光）
+const KEEP_OWN_COLOR = new Set(['Ant_Eye']);
+// 永遠不受光的材質（描邊外殼：它是輪廓，不是表面）
+const UNLIT = new Set(['Ant_Outline']);
+// 需要讀 COLOR_0 的材質（腹部條紋）
+const USE_BANDS = new Set(['AntT_Gaster']);
+// 眼圈：線跨過眼睛島嶼的邊界，所以頭與眼睛兩側都要畫，寬度不同
+// （Blender 端 AntT_Head W=0.0040、Ant_Eye W=0.0015，柔度共用 0.0008）
+const RIM_W = { AntT_Head: 0.0040, Ant_Eye: 0.0015 };
+const RIM_S = 0.0008;
+const RIM_SCALE = 0.06;          // Blender 烘 COLOR_0.g 時用的上限
+const RIM_COLOR = '#302010';     // 與 Ant_Outline 同色
+// 眼睛解析高光的常數 —— 來源 Blender Ant_Eye 節點群，
+// 座標已從 Blender 的 Z-up 轉成 three 的 Y-up：(x, y, z) -> (x, z, -y)
+const EYE = {
+  C: new THREE.Vector3(0.172169, 0.135007, 0.309794),
+  U: new THREE.Vector3(0.061442, 0.590327, -0.804822),
+  V: new THREE.Vector3(0.591890, -0.670815, -0.446848),
+  N: new THREE.Vector3(0.803674, 0.448911, 0.390625),
+  KU: 12.799242,
+  KV: 34.224476,
+  a: 0.050468,   // 半長軸
+  b: 0.030863,   // 半短軸
+  qmax: 0.62,
+  R: 0.01275,    // 高光半徑
+  W: 0.0014,     // 邊緣柔度
+  SU: 4.0,       // EyeUV 烘進 [0,1] 時用的壓縮倍率（Blender 端同值）
+  color: '#E3D7C7',
+};
+
+function makeMaterial(name, side) {
+  const [light, dark] = PALETTE[name] || FALLBACK;
+  return new THREE.ShaderMaterial({
+    name,
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    side,
+    // 只有腹部需要頂點色；其他材質開了會多傳一份用不到的 attribute。
+    vertexColors: USE_BANDS.has(name) || RIM_W[name] !== undefined,
+    // getShadowMask() 需要 three 注入的燈光／陰影 uniform，
+    // 所以要 lights: true 並把 UniformsLib.lights 併進來。
+    lights: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.lights,
+      {
+        uLight: { value: new THREE.Color(light) },
+        uDark: { value: new THREE.Color(dark) },
+        uBase: { value: new THREE.Color('#8A7150') },
+        uLightDir: { value: new THREE.Vector3(0, 1, 0) },
+        uThreshold: { value: 0.0 },
+        uAmbient: { value: 0.15 },
+        uMode: { value: 1 }, // 1 = 雙色調（預設模式，與 ant.html 的 checked 一致）
+        uKeepOwnColor: { value: KEEP_OWN_COLOR.has(name) ? 1 : 0 },
+        uUnlit: { value: UNLIT.has(name) ? 1 : 0 },
+        uSpecular: { value: 0.35 },
+        uShininess: { value: 128 },
+        uShadow: { value: 1 },
+        uViewWeight: { value: 0.62 },   // Blender 的 VECT_MATH/SCALE
+        uBandN: { value: 3.0 },         // Blender 的 BandN
+        uBandW: { value: 0.60 },        // Blender 的 BandW
+        uBandK: { value: 0.62 },        // Blender 的 BandK
+        uUseBands: { value: USE_BANDS.has(name) ? 1 : 0 },
+        uEyeHi: { value: name === 'Ant_Eye' ? 1 : 0 },
+        uEyeC: { value: EYE.C.clone() },
+        uEyeU: { value: EYE.U.clone() },
+        uEyeV: { value: EYE.V.clone() },
+        uEyeN: { value: EYE.N.clone() },
+        uHiColor: { value: new THREE.Color(EYE.color) },
+        uCamObj: { value: new THREE.Vector3() },
+        uLightObj: { value: new THREE.Vector3(0, 1, 0) },
+        uKU: { value: EYE.KU },
+        uKV: { value: EYE.KV },
+        uEyeA: { value: EYE.a },
+        uEyeB: { value: EYE.b },
+        uQmax: { value: EYE.qmax },
+        uHiR: { value: EYE.R },
+        uHiW: { value: EYE.W },
+        uEyeSU: { value: EYE.SU },
+        uUseRim: { value: RIM_W[name] !== undefined ? 1 : 0 },
+        uRimW: { value: RIM_W[name] !== undefined ? RIM_W[name] : 0 },
+        uRimS: { value: RIM_S },
+        uRimScale: { value: RIM_SCALE },
+        uRimColor: { value: new THREE.Color(RIM_COLOR) },
+      },
+    ]),
+  });
+}
+
+// ---------------------------------------------------------------- 場景
+
+// 可視繪圖區 = 視窗扣掉左側面板（面板是 fixed 覆蓋層）
+function viewSize() {
+  const panel = document.getElementById('panel');
+  const w = Math.max(1, innerWidth - (panel ? panel.offsetWidth : 0));
+  return { w, h: Math.max(1, innerHeight), aspect: w / Math.max(1, innerHeight) };
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(viewSize().w, viewSize().h);
+// 不做 tone mapping —— 要讓調色盤的 hex 原封不動地打到畫面上
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(WORLD_BG);
+
+const group = new THREE.Group(); // 承載模型，用來轉 180° 面向鏡頭
+scene.add(group);
+
+// 這盞燈只負責產生陰影貼圖 —— 顏色和強度不影響畫面，
+// 著色器的明暗是自己用 uLightDir 算的，只跟它拿 getShadowMask()。
+const sun = new THREE.DirectionalLight(0xffffff, 1);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun, sun.target);
+
+// 只畫陰影、本身完全透明的地面。螞蟻的部位細又分散，
+// 平行光在牠身上產生的自我遮蔽極少（實測不到可見像素的 2%），
+// 投在地面上的影子才是真正看得出來的那個。
+// 地面：對齊 Blender 的做法（summary.md §6.4）——
+// 不是半透明的 ShadowMaterial，而是「受光 / 陰影」兩個平塗色硬邊切開。
+// Blender 那邊用 Diffuse -> Shader to RGB -> ColorRamp(CONSTANT)；
+// three.js 沒有 Shader to RGB，但 getShadowMask() 給的就是同一個東西。
+const GROUND_LIT = '#A79C4C';   // = Blender 的地面色（線性 0.3864,0.3325,0.0723）
+const GROUND_K = 0.60;          // Blender 的陰影深度係數
+
+const GROUND_VERT = /* glsl */ `
+  #include <common>
+  #include <shadowmap_pars_vertex>
+  void main() {
+    #include <beginnormal_vertex>
+    #include <defaultnormal_vertex>
+    #include <begin_vertex>
+    #include <project_vertex>
+    #include <worldpos_vertex>
+    #include <shadowmap_vertex>
+  }
+`;
+
+const GROUND_FRAG = /* glsl */ `
+  #include <common>
+  #include <packing>
+  #include <bsdfs>
+  #include <lights_pars_begin>
+  #include <shadowmap_pars_fragment>
+  #include <shadowmask_pars_fragment>
+  uniform vec3  uGroundLit;
+  uniform float uGroundK;
+  uniform float uGroundThr;
+  void main() {
+    float lit = step(uGroundThr, getShadowMask());   // 硬邊，等同 ColorRamp 的 CONSTANT
+    gl_FragColor = vec4(uGroundLit * mix(uGroundK, 1.0, lit), 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.ShaderMaterial({
+    name: 'Ground',
+    vertexShader: GROUND_VERT,
+    fragmentShader: GROUND_FRAG,
+    lights: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.lights,
+      {
+        uGroundLit: { value: new THREE.Color(GROUND_LIT) },
+        uGroundK: { value: GROUND_K },
+        uGroundThr: { value: 0.5 },
+      },
+    ]),
+  })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+let camera = new THREE.PerspectiveCamera(45, viewSize().aspect, 0.01, 100);
+let controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+let bounds = { center: new THREE.Vector3(), radius: 1 };
+
+// ---------------------------------------------------------------- DOM
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  thr: $('thr'), thrOut: $('thr-out'), thrRow: $('thr-row'),
+  vw: $('vw'), vwOut: $('vw-out'),
+  litSection: $('lit-section'),
+  lightDirSection: $('lightdir-section'),
+  bandSection: $('band-section'),
+  shadowSection: $('shadow-section'),
+  opx: $('opx'), opxOut: $('opx-out'), opxRow: $('opx-row'),
+  bn: $('bn'), bnOut: $('bn-out'),
+  bw: $('bw'), bwOut: $('bw-out'),
+  bk: $('bk'), bkOut: $('bk-out'),
+  eyeSection: $('eye-section'),
+  hir: $('hir'), hirOut: $('hir-out'),
+  hiw: $('hiw'), hiwOut: $('hiw-out'),
+  rimOn: $('rim-on'), rimw: $('rimw'), rimwOut: $('rimw-out'),
+  base: $('base'), baseOut: $('base-out'),
+  elev: $('elev'), elevOut: $('elev-out'),
+  azim: $('azim'), azimOut: $('azim-out'),
+  amb: $('amb'), ambOut: $('amb-out'),
+  spec: $('spec'), specOut: $('spec-out'),
+  shin: $('shin'), shinOut: $('shin-out'),
+  shadowOn: $('shadow-on'), groundOn: $('ground-on'), shadow: $('shadow'), shadowOut: $('shadow-out'),
+  fixOffset: $('fix-offset'), inPlace: $('in-place'),
+  advance: $('advance'), laps: $('laps'), lapsOut: $('laps-out'), lapsRow: $('laps-row'),
+  follow: $('follow'),
+  keys: $('keys'), turn: $('turn'), turnOut: $('turn-out'), turnRow: $('turn-row'),
+  dpad: $('dpad'),
+  play: $('play'), cycle: $('cycle'), cycleOut: $('cycle-out'), timeOut: $('time-out'),
+  front: $('front'), hi: $('hi'), bgRef: $('bg-ref'),
+  faceCam: $('face-cam'), ortho: $('ortho'), rot: $('rot'),
+  fps: $('fps'), status: $('status'),
+};
+
+let statusTimer = 0;
+function status(msg, isError = false) {
+  els.status.textContent = msg;
+  els.status.classList.toggle('error', isError);
+  els.status.classList.add('show');
+  clearTimeout(statusTimer);
+  if (!isError) statusTimer = setTimeout(() => els.status.classList.remove('show'), 2600);
+}
+
+// ---------------------------------------------------------------- 載入
+
+const loader = new GLTFLoader();
+let model = null;
+let mixer = null;
+let action = null;
+let baseClip = null;
+const materials = [];
+// Ant_Hi 是原模型內建的眼睛反光片（#E3D7C7 米白橢圓）。
+// 真實螞蟻沒有眼白，預設藏起來。
+const HI_MATERIAL = 'Ant_Hi';
+const hiMeshes = [];
+// 解析高光要把相機與光源換算到物件空間，需要眼睛那塊網格的 matrixWorld
+let eyeMesh = null;
+let eyeMaterial = null;
+const outlineMats = [];
+const outlineMeshes = [];
+
+async function loadModel(kind) {
+  status('載入中…');
+  const gltf = await loader.loadAsync(MODELS[kind]);
+
+  if (model) group.remove(model);
+  materials.length = 0;
+  hiMeshes.length = 0;
+  eyeMesh = null;
+  eyeMaterial = null;
+  outlineMats.length = 0;
+  outlineMeshes.length = 0;
+
+  model = gltf.scene;
+  const seen = new Map();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const src = o.material;
+    if (src.name === HI_MATERIAL) hiMeshes.push(o);
+    if (src.name === 'Ant_Eye') eyeMesh = o;
+    if (!seen.has(src.uuid)) {
+      const m = makeMaterial(src.name, src.side);
+      seen.set(src.uuid, m);
+      materials.push(m);
+    }
+    o.material = seen.get(src.uuid);
+    if (src.name === 'Ant_Eye') eyeMaterial = o.material;
+    o.frustumCulled = false; // 蒙皮後的包圍盒不準，關掉免得整隻被裁掉
+    // 描邊外殼是外擴 0.010 的殼，讓它投影會投出比本體大一圈的影子
+    o.castShadow = src.name !== "Ant_Outline";
+    o.receiveShadow = true;
+  });
+  // 即時描邊：對每塊網格複製一份，綁同一副骨架，用 BackSide + 頂點外推
+  if (kind === 'rt') {
+    const src = [];
+    model.traverse((o) => { if (o.isMesh && o.material.name !== HI_MATERIAL) src.push(o); });
+    for (const o of src) {
+      const mat = makeOutlineMaterial();
+      let clone;
+      if (o.isSkinnedMesh) {
+        clone = new THREE.SkinnedMesh(o.geometry, mat);
+        clone.bind(o.skeleton, o.bindMatrix);
+      } else {
+        clone = new THREE.Mesh(o.geometry, mat);
+      }
+      clone.name = o.name + '_outline';
+      clone.frustumCulled = false;
+      clone.castShadow = false;      // 外殼比本體大一圈，讓它投影會投出大一圈的影子
+      clone.receiveShadow = false;
+      o.parent.add(clone);
+      outlineMats.push(mat);
+      outlineMeshes.push(clone);
+    }
+  }
+
+  group.add(model);
+  applyHi();
+  applySide();
+
+  baseClip = gltf.animations[0] || null;
+  mixer = baseClip ? new THREE.AnimationMixer(model) : null;
+  rebuildAction();
+
+  frameModel();
+  applyShading();
+  applyFaceCam();
+  applyWalkUI();
+
+  const names = [...seen.values()].map((m) => m.name);
+  const missing = names.filter((n) => !PALETTE[n]);
+  status(
+    '已載入 ' + kind + '：' + names.length + ' 個材質' +
+    (missing.length ? '，' + missing.length + ' 個沒對到色票（顯示洋紅）' : '，全部對到色票')
+  );
+  console.log('材質對應：', names.map((n) => n + (PALETTE[n] ? ' ✓' : ' ✗ 未對到')));
+}
+
+// ---------------------------------------------------------------- 動畫
+
+function rebuildAction() {
+  if (!mixer || !baseClip) {
+    els.timeOut.textContent = '（此模型沒有動畫）';
+    return;
+  }
+  const wasPaused = action ? action.paused : false;
+  mixer.stopAllAction();
+  mixer.uncacheRoot(model);
+
+  const clip = baseClip.clone();
+
+  // 1. 匯出器沒扣 frame_start，開頭有 1/24 s 定格
+  if (els.fixOffset.checked) {
+    for (const t of clip.tracks) {
+      for (let i = 0; i < t.times.length; i++) t.times[i] -= 1 / FPS;
+    }
+    clip.resetDuration();
+  }
+
+  // 2. Root 有累積位移，拔掉才會原地走
+  if (els.inPlace.checked) {
+    clip.tracks = clip.tracks.filter((t) => t.name !== ROOT_TRACK);
+  }
+
+  action = mixer.clipAction(clip);
+  action.play();
+  action.paused = wasPaused;
+  applyCycle();
+  els.play.textContent = action.paused ? '播放' : '暫停';
+}
+
+// 面板設定的是「一次循環要跑幾秒」（牆鐘時間）。
+// AnimationMixer 吃的是倍率，所以換算：倍率 = clip 原長 / 目標秒數。
+// clip 原長會隨「修正開頭 1/24 s 空白」改變（0.666667 或 0.708333），
+// 所以每次重建 clip 都要重算。
+function applyCycle() {
+  const target = Number(els.cycle.value);
+  els.cycleOut.textContent = target.toFixed(2) + ' s';
+  if (!mixer || !action) return;
+  const clipSeconds = action.getClip().duration;
+  mixer.timeScale = clipSeconds / target;
+}
+
+// ---------------------------------------------------------------- 相機
+
+function frameModel() {
+  const box = new THREE.Box3().setFromObject(model);
+  if (box.isEmpty()) return;
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  bounds = { center: sphere.center.clone(), radius: sphere.radius || 1, floorY: box.min.y };
+
+  // 地面貼齊模型最低點。尺寸要跟陰影相機的涵蓋範圍一致（r*2.3），
+  // 地面比陰影相機大的話，超出的部分會在畫面上露出一條視錐邊界線。
+  // 地面放大到看不到邊界為止（Blender 那邊是 40 x 40 的平面）。
+  // 陰影貼圖的範圍是由 placeSun() 依模型大小縮到最小的，不受這裡影響。
+  ground.scale.set(sphere.radius * 14, sphere.radius * 14, 1);
+  ground.position.set(sphere.center.x, box.min.y, sphere.center.z);
+
+  placeCamera();
+}
+
+function placeCamera() {
+  const { center, radius: r } = bounds;
+  const dir = new THREE.Vector3(0.45, 0.28, 1).normalize();
+  const { aspect } = viewSize();
+
+  // 視窗窄的時候水平視角比垂直小，只算垂直會把寬的模型切掉。
+  // 取兩者較小的那個當基準。
+  const vFov = THREE.MathUtils.degToRad(45);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+  const dist = (r / Math.sin(Math.min(vFov, hFov) / 2)) * 1.25;
+
+  if (camera.isOrthographicCamera) {
+    // 同理：視窗比模型窄時要用 aspect 反推半高，否則左右會被切掉
+    const h = aspect >= 1 ? r * 1.25 : (r * 1.25) / aspect;
+    const a = aspect;
+    camera.left = -h * a;
+    camera.right = h * a;
+    camera.top = h;
+    camera.bottom = -h;
+    camera.near = -r * 10;
+    camera.far = r * 10;
+  } else {
+    camera.near = r / 100;
+    camera.far = r * 20;
+  }
+  camera.position.copy(center).addScaledVector(dir, dist);
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.update();
+}
+
+function swapCamera() {
+  const old = camera;
+  camera = els.ortho.checked
+    ? new THREE.OrthographicCamera(-1, 1, 1, -1, -100, 100)
+    : new THREE.PerspectiveCamera(45, viewSize().aspect, 0.01, 100);
+  camera.position.copy(old.position);
+  controls.dispose();
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.autoRotate = els.rot.checked;
+  controls.autoRotateSpeed = 1.5;
+  placeCamera();
+}
+
+// ---------------------------------------------------------------- 控制項
+
+const MODE = { flat: 0, two: 1, lit: 2 };
+
+// 把產生陰影的平行光擺到模型上方，並把陰影相機縮到剛好框住模型 ——
+// 範圍越小，2048² 的陰影貼圖在模型上的解析度就越高。
+function placeSun(dir) {
+  const { center, radius: r } = bounds;
+  sun.castShadow = els.shadowOn.checked;
+  sun.position.copy(center).addScaledVector(dir, r * 4);
+  sun.target.position.copy(center);
+  sun.target.updateMatrixWorld();
+
+  const c = sun.shadow.camera;
+  c.left = -r * 1.15;
+  c.right = r * 1.15;
+  c.top = r * 1.15;
+  c.bottom = -r * 1.15;
+  c.near = r * 0.5;
+  c.far = r * 8;
+  c.updateProjectionMatrix();
+  // 沿法線推開取樣點避免曲面自我遮蔽條紋（shadow acne）。
+  // 螞蟻的腿很細，推太多取樣點會跑出腿外面，自我遮蔽就沒了 ——
+  // 實測 r*0.02 只剩 217 個受影響像素，r*0.002 有 305 個，所以取小值。
+  sun.shadow.normalBias = r * 0.002;
+}
+
+// 仰角／方位角 → 世界空間的單位方向向量（由表面指向光源）
+function lightDirection(elevDeg, azimDeg) {
+  const e = THREE.MathUtils.degToRad(elevDeg);
+  const a = THREE.MathUtils.degToRad(azimDeg);
+  const horiz = Math.cos(e);
+  return new THREE.Vector3(horiz * Math.sin(a), Math.sin(e), horiz * Math.cos(a));
+}
+
+function applyShading() {
+  const mode = document.querySelector('input[name="shade"]:checked').value;
+  const thr = Number(els.thr.value);
+  const vw = Number(els.vw.value);
+  const bn = Number(els.bn.value);
+  const bw = Number(els.bw.value);
+  const bk = Number(els.bk.value);
+  const hir = Number(els.hir.value);
+  const hiw = Number(els.hiw.value);
+  const rimOn = els.rimOn.checked ? 1 : 0;
+  const rimW = Number(els.rimw.value);
+  const amb = Number(els.amb.value);
+  const elev = Number(els.elev.value);
+  const azim = Number(els.azim.value);
+  const spec = Number(els.spec.value);
+  const shin = Number(els.shin.value);
+  const shadow = els.shadowOn.checked ? Number(els.shadow.value) : 0;
+  const dir = lightDirection(elev, azim);
+
+  els.thrOut.textContent = thr.toFixed(2);
+  els.vwOut.textContent = vw.toFixed(2);
+  els.bnOut.textContent = bn.toFixed(1);
+  els.bwOut.textContent = bw.toFixed(2);
+  els.bkOut.textContent = bk.toFixed(2);
+  els.hirOut.textContent = hir.toFixed(5);
+  els.hiwOut.textContent = hiw.toFixed(5);
+  els.rimwOut.textContent = rimW.toFixed(4);
+  els.rimw.disabled = !els.rimOn.checked;
+  els.baseOut.textContent = els.base.value.toUpperCase();
+  els.elevOut.textContent = elev + '°';
+  els.azimOut.textContent = azim + '°';
+  els.ambOut.textContent = amb.toFixed(2);
+  els.specOut.textContent = spec.toFixed(2);
+  els.shinOut.textContent = String(shin);
+  els.shadowOut.textContent = Number(els.shadow.value).toFixed(2);
+
+  els.thrRow.hidden = mode !== 'two';
+  els.litSection.hidden = mode !== 'lit';
+  // 光源方向兩個模式都用得到:雙色調拿它當 L,頂光拿它當平行光方向
+  els.lightDirSection.hidden = mode === 'flat';
+  els.bandSection.hidden = mode === 'flat';
+  els.shadowSection.hidden = mode === 'flat';
+  const opx = Number(els.opx.value);
+  els.opxOut.textContent = opx.toFixed(1);
+  els.opxRow.hidden = document.querySelector('input[name="model"]:checked').value !== 'rt';
+  for (const m of outlineMats) m.uniforms.uOutlinePx.value = opx;
+  els.eyeSection.hidden = mode !== 'two';
+  els.azim.disabled = elev >= 90; // 正頭頂時方位角沒有意義
+  els.shadow.disabled = !els.shadowOn.checked;
+
+  placeSun(dir);
+  // 雙色調模式也要有地面陰影 —— 那是 Blender 那張圖的一部分
+  ground.visible = mode !== 'flat' && els.shadowOn.checked && els.groundOn.checked;
+  // 陰影強度 1.00 -> K 0.60（與 Blender 相同）；0.00 -> K 1.00（看不見）
+  ground.material.uniforms.uGroundK.value = 1 - (1 - GROUND_K) * Number(els.shadow.value);
+
+  for (const m of materials) {
+    m.uniforms.uShadow.value = shadow;
+    m.uniforms.uMode.value = MODE[mode];
+    m.uniforms.uThreshold.value = thr;
+    m.uniforms.uAmbient.value = amb;
+    m.uniforms.uBase.value.set(els.base.value);
+    m.uniforms.uLightDir.value.copy(dir);
+    m.uniforms.uSpecular.value = spec;
+    m.uniforms.uShininess.value = shin;
+    m.uniforms.uViewWeight.value = vw;
+    m.uniforms.uBandN.value = bn;
+    m.uniforms.uBandW.value = bw;
+    m.uniforms.uBandK.value = bk;
+    m.uniforms.uHiR.value = hir;
+    m.uniforms.uHiW.value = hiw;
+    if (m.uniforms.uUseRim.value > 0.5) {
+      m.uniforms.uUseRim.value = rimOn;
+      // 眼睛那一側維持 Blender 的 0.375 倍比例（0.0015 / 0.0040）
+      m.uniforms.uRimW.value = m.name === 'Ant_Eye' ? rimW * 0.375 : rimW;
+    }
+  }
+}
+
+function applyFaceCam() {
+  group.rotation.y = els.faceCam.checked ? Math.PI : 0;
+}
+
+function applyHi() {
+  for (const m of hiMeshes) m.visible = els.hi.checked;
+}
+
+// glTF 把 8 個材質全部標成 doubleSided，而每塊網格都有開放邊界，
+// 於是會看到殼的內壁 —— 讀起來像半透明。剔除背面就沒有這個問題。
+function applySide() {
+  const side = els.front.checked ? THREE.FrontSide : THREE.DoubleSide;
+  for (const m of materials) m.side = side;
+}
+
+for (const el of [els.thr, els.vw, els.bn, els.bw, els.bk, els.hir, els.hiw, els.rimw, els.opx, els.base, els.elev, els.azim, els.amb, els.spec, els.shin, els.shadow]) el.oninput = applyShading;
+els.shadowOn.onchange = applyShading;
+els.rimOn.onchange = applyShading;
+els.groundOn.onchange = applyShading;
+for (const r of document.querySelectorAll('input[name="shade"]')) r.onchange = applyShading;
+for (const r of document.querySelectorAll('input[name="model"]')) {
+  r.onchange = (e) => loadModel(e.target.value).catch((err) => status('載入失敗：' + err.message, true));
+}
+
+els.fixOffset.onchange = rebuildAction;
+els.inPlace.onchange = () => { applyWalkUI(); rebuildAction(); };
+els.advance.onchange = applyWalkUI;
+els.laps.oninput = applyWalkUI;
+els.follow.onchange = applyWalkUI;
+els.keys.onchange = applyWalkUI;
+els.turn.oninput = applyWalkUI;
+
+function applyWalkUI() {
+  const key = els.keys.checked;
+  const auto = els.inPlace.checked && els.advance.checked && !key;
+  els.advance.disabled = !els.inPlace.checked || key;
+  els.lapsRow.hidden = !auto;
+  els.turnRow.hidden = !key;
+  els.dpad.hidden = !key;
+  if (!key) { for (const k in KEYS) KEYS[k] = 0; releaseAllDpad(); }
+  els.follow.parentElement.hidden = !(auto || key);
+  const laps = Number(els.laps.value);
+  els.lapsOut.textContent = laps + ' 圈 · ' + (laps * STRIDE_PER_CYCLE).toFixed(2) + ' 單位';
+  els.turnOut.textContent = els.turn.value + '°/s';
+  if (key) {
+    // 方向鍵模式一定要拔掉 Root 位移，否則會疊加兩份前進
+    if (!els.inPlace.checked) { els.inPlace.checked = true; rebuildAction(); }
+    els.play.textContent = '（方向鍵控制）';
+  } else {
+    heading = 0;
+    if (model) { model.rotation.y = 0; model.position.set(0, 0, 0); }
+    if (mixer) mixer.timeScale = Math.abs(mixer.timeScale);
+    if (action) { action.paused = false; els.play.textContent = '暫停'; }
+  }
+}
+els.play.onclick = () => {
+  if (!action) return;
+  action.paused = !action.paused;
+  els.play.textContent = action.paused ? '播放' : '暫停';
+};
+els.cycle.oninput = applyCycle;
+els.front.onchange = applySide;
+els.hi.onchange = applyHi;
+els.bgRef.onchange = () => {
+  scene.background = new THREE.Color(els.bgRef.checked ? WORLD_BG : '#0d1117');
+};
+els.faceCam.onchange = applyFaceCam;
+els.ortho.onchange = swapCamera;
+els.rot.onchange = () => {
+  controls.autoRotate = els.rot.checked;
+  controls.autoRotateSpeed = 1.5;
+};
+
+function relayout() {
+  if (camera.isPerspectiveCamera) camera.aspect = viewSize().aspect;
+  renderer.setSize(viewSize().w, viewSize().h);
+  placeCamera();
+}
+addEventListener('resize', relayout);
+
+// ---------------------------------------------------------------- 面板收合
+// 收合後 panel.offsetWidth 變 0，viewSize() 算出來就是整個視窗，
+// 但 resize 事件不會自己觸發，所以要手動跑一次 relayout()。
+const panelToggle = document.getElementById('panel-toggle');
+function setPanel(hidden) {
+  document.body.classList.toggle('panel-hidden', hidden);
+  panelToggle.setAttribute('aria-expanded', String(!hidden));
+  panelToggle.textContent = hidden ? '☰' : '✕';
+  panelToggle.setAttribute('aria-label', hidden ? '展開面板' : '收合面板');
+  relayout();
+}
+panelToggle.addEventListener('click', () => {
+  setPanel(!document.body.classList.contains('panel-hidden'));
+});
+// 窄螢幕一開始就收起來，讓螞蟻佔滿畫面
+setPanel(innerWidth <= 700);
+
+// ---------------------------------------------------------------- 主迴圈
+
+function makeOutlineMaterial() {
+  return new THREE.ShaderMaterial({
+    name: 'Ant_Outline_RT',
+    vertexShader: OUTLINE_VERT,
+    fragmentShader: OUTLINE_FRAG,
+    vertexColors: true,          // 讀 COLOR_0.b = HullW
+    side: THREE.BackSide,        // 反向外殼：只畫背面
+    uniforms: {
+      uOutlinePx: { value: 3.0 },          // 與 Blender 的 TARGET_PX 同值
+      uPxScale: { value: 0.001 },
+      uOrtho: { value: 0 },
+      uOutlineColor: { value: new THREE.Color(PALETTE.Ant_Outline[0]) },
+    },
+  });
+}
+
+// 每格更新「每像素的世界長度」係數 —— 視埠大小與 fov 都可能變
+function updateOutlineScale() {
+  if (!outlineMats.length) return;
+  const h = Math.max(1, renderer.domElement.height / renderer.getPixelRatio());
+  let ortho = 0, scale;
+  if (camera.isOrthographicCamera) {
+    ortho = 1;
+    scale = (camera.top - camera.bottom) / camera.zoom / h;
+  } else {
+    scale = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / h;
+  }
+  for (const m of outlineMats) {
+    m.uniforms.uOrtho.value = ortho;
+    m.uniforms.uPxScale.value = scale;
+  }
+}
+
+// 眼睛的解析高光整組在「物件空間」算（跟 Blender 一樣，那邊物件變換是單位矩陣）。
+// 所以每格要把相機位置與光方向換算進去 —— 不然 group 轉 180° 面向鏡頭時高光會跑掉。
+const _camObj = new THREE.Vector3();
+const _lightObj = new THREE.Vector3();
+const _nm = new THREE.Matrix3();
+function updateEyeSpace() {
+  if (!eyeMesh || !eyeMaterial) return;
+  eyeMesh.updateWorldMatrix(true, false);
+  _camObj.copy(camera.position);
+  eyeMesh.worldToLocal(_camObj);
+  _nm.setFromMatrix4(eyeMesh.matrixWorld).invert();
+  _lightObj.copy(eyeMaterial.uniforms.uLightDir.value).applyMatrix3(_nm).normalize();
+  eyeMaterial.uniforms.uCamObj.value.copy(_camObj);
+  eyeMaterial.uniforms.uLightObj.value.copy(_lightObj);
+}
+
+// 「原地走」把 Root 的位移軌拔掉了，所以要自己推進，否則螞蟻只會在原地踏步。
+// 速度必須跟著播放速率縮放，不然腳會打滑：每圈固定走 STRIDE_PER_CYCLE，
+// 一圈花幾秒由面板決定 → 速度 = STRIDE_PER_CYCLE / 一圈秒數。
+// ---------------------------------------------------------------- 方向鍵操控
+// 螞蟻在模型空間朝 +Z（見 gltf/README.md 的座標軸更正），
+// 所以朝向角 heading 對應的前進向量是 (sin h, 0, cos h)。
+const KEYS = { ArrowUp: 0, ArrowDown: 0, ArrowLeft: 0, ArrowRight: 0 };
+let heading = 0;
+
+addEventListener('keydown', (e) => {
+  if (!(e.key in KEYS)) return;
+  if (!els.keys.checked) return;
+  KEYS[e.key] = 1;
+  e.preventDefault();          // 不然方向鍵會捲動頁面
+});
+addEventListener('keyup', (e) => {
+  if (!(e.key in KEYS)) return;
+  KEYS[e.key] = 0;
+});
+addEventListener('blur', () => { for (const k in KEYS) KEYS[k] = 0; releaseAllDpad(); });
+
+// 虛擬方向鍵：跟實體方向鍵共用同一組 KEYS 旗標。
+// 用 pointer 事件而不是 click，才能「按住持續前進」；
+// setPointerCapture 讓手指滑出按鈕外面也收得到 pointerup，不會卡在按下狀態。
+const dpadBtns = [...document.querySelectorAll('.dpad-btn')];
+function releaseAllDpad() {
+  for (const b of dpadBtns) b.classList.remove('active');
+}
+for (const btn of dpadBtns) {
+  const key = btn.dataset.key;
+  const press = (e) => {
+    e.preventDefault();
+    KEYS[key] = 1;
+    btn.classList.add('active');
+    try { btn.setPointerCapture(e.pointerId); } catch { /* 有些瀏覽器不支援，忽略 */ }
+  };
+  const release = (e) => {
+    if (e) e.preventDefault();
+    KEYS[key] = 0;
+    btn.classList.remove('active');
+  };
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('lostpointercapture', release);
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());   // 長按不要跳選單
+}
+
+const _follow = new THREE.Vector3();
+const _prev = new THREE.Vector3();
+
+function advanceWalk(dt) {
+  if (!model || !action) return;
+  const target = Math.max(0.01, Number(els.cycle.value));
+  const speed = STRIDE_PER_CYCLE / target;        // 跟著播放速率縮放，腳才不打滑
+  _prev.copy(model.position);
+  let wrapped = 0;
+
+  if (els.keys.checked) {
+    // ← → 轉向
+    const turn = THREE.MathUtils.degToRad(Number(els.turn.value)) * dt;
+    heading += (KEYS.ArrowLeft - KEYS.ArrowRight) * turn;
+    model.rotation.y = heading;
+
+    // ↑ ↓ 前進／後退。後退時把動畫倒放，不然會月球漫步。
+    const dir = KEYS.ArrowUp - KEYS.ArrowDown;
+    if (dir !== 0) {
+      model.position.x += Math.sin(heading) * speed * dir * dt;
+      model.position.z += Math.cos(heading) * speed * dir * dt;
+    }
+    action.paused = (dir === 0);                  // 沒按就停在原地不踏步
+    mixer.timeScale = Math.abs(mixer.timeScale) * (dir < 0 ? -1 : 1);
+  } else {
+    if (!els.inPlace.checked || !els.advance.checked) return;
+    if (action.paused) return;
+    model.position.z += speed * dt;
+    const limit = Number(els.laps.value) * STRIDE_PER_CYCLE;
+    if (model.position.z >= limit) { model.position.z -= limit; wrapped = limit; }
+  }
+
+  // 相機跟著走：把螞蟻的實際位移同時加到相機與軌道中心，
+  // 這樣使用者仍然可以自由環繞，只是整組跟著平移。
+  if (els.follow.checked) {
+    _follow.subVectors(model.position, _prev);
+    if (wrapped) _follow.z += wrapped;
+    if (_follow.lengthSq() > 0) {
+      _follow.applyQuaternion(group.quaternion);   // group 可能轉了 180 度
+      camera.position.add(_follow);
+      controls.target.add(_follow);
+    }
+  }
+}
+
+const clock = new THREE.Clock();
+let frames = 0;
+let fpsTime = 0;
+
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  if (mixer) mixer.update(dt);
+  if (action) {
+    // 讀數用牆鐘時間，跟面板設定的「一次循環幾秒」一致；
+    // 括號裡標出原始 clip 長度與換算出的倍率
+    const d = action.getClip().duration;
+    const target = Number(els.cycle.value);
+    const t = d ? ((action.time % d) / d) * target : 0;
+    els.timeOut.textContent =
+      t.toFixed(2) + ' / ' + target.toFixed(2) + ' s' +
+      '（clip ' + d.toFixed(6) + ' s × ' + (d / target).toFixed(4) + '）';
+  }
+  advanceWalk(dt);
+  updateEyeSpace();
+  updateOutlineScale();
+  controls.update();
+  renderer.render(scene, camera);
+
+  frames++;
+  fpsTime += dt;
+  if (fpsTime >= 0.5) {
+    const info = renderer.info.render;
+    els.fps.textContent =
+      (frames / fpsTime).toFixed(0) + ' fps · ' + info.calls + ' draw calls · ' +
+      info.triangles.toLocaleString('en-US') + ' tris';
+    frames = 0;
+    fpsTime = 0;
+  }
+});
+
+if (false) {
+  window.__ant = {
+    THREE, scene, group, renderer, PALETTE,
+    getCamera: () => camera,
+    getControls: () => controls,
+    getModel: () => model,
+    getMixer: () => mixer,
+    getAction: () => action,
+    getMaterials: () => materials,
+  };
+}
+
+loadModel('rt').catch((err) => status('載入失敗：' + err.message, true));
+
+
+// ---------------------------------------------------------------- 開場提示
+const hintBox = document.getElementById('hint');
+function dismissHint() { if (hintBox && !hintBox.hidden) hintBox.hidden = true; }
+document.getElementById('hint-close')?.addEventListener('click', dismissHint);
+addEventListener('keydown', dismissHint, { once: true });
+document.querySelector('canvas')?.addEventListener('pointerdown', dismissHint, { once: true });
+for (const b of document.querySelectorAll('.dpad-btn')) {
+  b.addEventListener('pointerdown', dismissHint, { once: true });
+}
+setTimeout(dismissHint, 12000);
+
+</script>
