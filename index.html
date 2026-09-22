@@ -127,16 +127,17 @@ output { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
 #status.error { border-color: #f85149; color: #ff7b72; }
 
 /* ---------------------------------------------------------------- 虛擬方向鍵
-   放在畫布右下角。用 grid 排成十字，按住時整顆變亮。
+   放在畫布左下角（bite 鈕在右下角，兩隻拇指各管一邊）。
+   用 grid 排成十字，按住時整顆變亮。
    touch-action: none 是必要的 —— 不然手指按住拖曳會被瀏覽器當成捲動，
    pointerup 收不到，螞蟻就會一直走。 */
 #dpad {
   position: fixed;
-  right: 24px;
+  left: 24px;
   bottom: 24px;
   display: grid;
-  grid-template-columns: repeat(3, 56px);
-  grid-template-rows: repeat(3, 56px);
+  grid-template-columns: repeat(3, 112px);
+  grid-template-rows: repeat(3, 112px);
   gap: 6px;
   z-index: 5;
   touch-action: none;
@@ -144,22 +145,38 @@ output { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
   -webkit-user-select: none;
 }
 #dpad[hidden] { display: none; }
+/* 面板展開時會蓋到左下角，所以十字鍵跟著往右讓 */
+body.panel-open #dpad { left: 288px; }
 
-.dpad-btn {
-  width: 56px;
-  height: 56px;
+/* bite 鈕：右下角，跟十字鍵同一個底邊 */
+#bitepad {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 5;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#bitepad[hidden] { display: none; }
+
+.dpad-btn,
+.bite-btn {
+  width: 112px;
+  height: 112px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: rgba(22, 27, 34, 0.78);
   color: var(--text);
-  font-size: 22px;
+  font-size: 44px;
   line-height: 1;
   cursor: pointer;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
   transition: background 90ms, border-color 90ms;
 }
-.dpad-btn:hover { background: rgba(48, 54, 61, 0.85); }
+.dpad-btn:hover,
+.bite-btn:hover { background: rgba(48, 54, 61, 0.85); }
 .dpad-btn.active {
   background: var(--accent);
   border-color: var(--accent);
@@ -174,12 +191,15 @@ output { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
 /* 窄螢幕：按鈕放大一點、往內縮，手指比較好按 */
 @media (max-width: 700px) {
   #dpad {
-    right: 12px;
+    left: 12px;
     bottom: 12px;
-    grid-template-columns: repeat(3, 64px);
-    grid-template-rows: repeat(3, 64px);
+    grid-template-columns: repeat(3, 128px);
+    grid-template-rows: repeat(3, 128px);
   }
-  .dpad-btn { width: 64px; height: 64px; font-size: 26px; }
+  #bitepad { right: 12px; bottom: 12px; }
+  .dpad-btn,
+  .bite-btn { width: 128px; height: 128px; font-size: 52px; }
+  .bite-btn { font-size: 30px; }
 }
 
 /* ---------------------------------------------------------------- 面板收合
@@ -189,7 +209,6 @@ output { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
 #panel-toggle {
   position: fixed;
   top: 12px;
-  left: 288px;
   z-index: 6;
   width: 38px;
   height: 38px;
@@ -206,14 +225,30 @@ output { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
 }
 #panel-toggle:hover { background: rgba(48, 54, 61, 0.9); }
 
-body.panel-hidden #panel { display: none; }
-body.panel-hidden #panel-toggle { left: 12px; }
+/* 預設收合。寫成「要有 panel-open 才顯示」而不是「有 panel-hidden 才藏」，
+   是為了 JS 還沒跑之前就已經是收合狀態，不會先閃一下面板。 */
+#panel { display: none; }
+body.panel-open #panel { display: flex; }
+#panel-toggle { left: 12px; }
+body.panel-open #panel-toggle { left: 288px; }
 
 @media (max-width: 700px) {
   /* 窄螢幕預設就收起來，讓螞蟻佔滿畫面；要調參數再按 ☰ 打開 */
   #panel { width: min(276px, 86vw); }
   #panel-toggle { top: 10px; left: 10px; }
-  body:not(.panel-hidden) #panel-toggle { left: calc(min(276px, 86vw) + 12px); }
+  body.panel-open #panel-toggle { left: calc(min(276px, 86vw) + 12px); }
+}
+
+/* 右下角的 bite 鈕。不像方向鍵要「按住」，按一下就是一個完整的
+   0.4 秒包絡，所以回饋用 :active 就好，不需要 .active 類別。 */
+.bite-btn {
+  font-size: 30px;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.bite-btn:active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0d1117;
 }
 
 
@@ -234,7 +269,7 @@ body.panel-hidden #panel-toggle { left: 12px; }
   font: inherit; cursor: pointer;
 }
 #hint button:hover { background: var(--accent); color: #0d1117; }
-@media (max-width: 700px) { #hint { bottom: 210px; } }
+@media (max-width: 700px) { #hint { bottom: 420px; } }
 
 </style>
 
@@ -376,7 +411,12 @@ body.panel-hidden #panel-toggle { left: 12px; }
         <h2>動畫</h2>
         <label><input type="checkbox" id="fix-offset" checked /> 修正開頭 1/24 s 空白</label>
         <label><input type="checkbox" id="in-place" checked /> 原地走（拔掉 Root 位移）</label>
-        <label><input type="checkbox" id="keys" checked /> 方向鍵操控（↑↓ 前後　←→ 轉向）</label>
+        <label class="dial">
+          <span>大顎開合 <output id="jaw-out">0°</output></span>
+          <input id="jaw" type="range" min="0" max="1" step="0.01" value="0" />
+          <small>滿刻度 0°（靜置）～ 42°，往下張開；地獄蟻是在矢狀面上往上合的。按空白鍵或右下角的 bite 鈕：0.14 s 張到 42°、0.06 s 甩回來、往上越過靜置位 11.8°（夾住頭上那根角）、0.20 s 回位</small>
+        </label>
+        <label><input type="checkbox" id="keys" checked /> 方向鍵 / WSAD 操控（↑↓ 或 W S 前後　←→ 或 A D 轉向）</label>
         <label class="dial" id="turn-row" hidden>
           <span>轉向速度 <output id="turn-out">90°/s</output></span>
           <input id="turn" type="range" min="15" max="270" step="5" value="90" />
@@ -417,7 +457,7 @@ body.panel-hidden #panel-toggle { left: 12px; }
       </footer>
     </aside>
 
-    <button type="button" id="panel-toggle" aria-label="收合面板" aria-expanded="true">☰</button>
+    <button type="button" id="panel-toggle" aria-label="展開面板" aria-expanded="false">☰</button>
 
     <!-- 虛擬方向鍵：觸控裝置沒有實體方向鍵，而且不必先點畫面取得焦點 -->
     <div id="dpad" hidden>
@@ -427,9 +467,14 @@ body.panel-hidden #panel-toggle { left: 12px; }
       <button type="button" class="dpad-btn down"  data-key="ArrowDown"  aria-label="後退">↓</button>
     </div>
 
+    <!-- 咬合鈕單獨放右下角：跟十字鍵分兩邊，兩隻拇指各管一邊 -->
+    <div id="bitepad" hidden>
+      <button type="button" id="bite-btn" class="bite-btn" aria-label="咬合">bite</button>
+    </div>
+
     <div id="hint">
-      <strong>用方向鍵或右下角的十字鍵走動</strong>
-      <span>↑↓ 前進後退　←→ 轉向　·　左鍵拖曳環繞　滾輪縮放</span>
+      <strong>用方向鍵、WSAD，或左下角的十字鍵走動</strong>
+      <span>↑↓ / W S 前後　←→ / A D 轉向　空白鍵 / bite 鈕　·　左鍵拖曳環繞　滾輪縮放</span>
       <button type="button" id="hint-close">知道了</button>
     </div>
 
@@ -922,6 +967,8 @@ const els = {
   follow: $('follow'),
   keys: $('keys'), turn: $('turn'), turnOut: $('turn-out'), turnRow: $('turn-row'),
   dpad: $('dpad'),
+  bitepad: $('bitepad'),
+  jaw: $('jaw'), jawOut: $('jaw-out'), biteBtn: $('bite-btn'),
   play: $('play'), cycle: $('cycle'), cycleOut: $('cycle-out'), timeOut: $('time-out'),
   front: $('front'), hi: $('hi'), bgRef: $('bg-ref'),
   faceCam: $('face-cam'), ortho: $('ortho'), rot: $('rot'),
@@ -952,6 +999,9 @@ const hiMeshes = [];
 // 解析高光要把相機與光源換算到物件空間，需要眼睛那塊網格的 matrixWorld
 let eyeMesh = null;
 let eyeMaterial = null;
+// 大顎：走路 clip 裡有軌道但整段是常數（17 格旋轉變化 0.000000°），
+// 所以混合器每格都會把它寫回靜置值 —— 手動旋轉必須在 mixer.update() 之後做。
+const mandibles = [];
 const outlineMats = [];
 const outlineMeshes = [];
 
@@ -964,6 +1014,7 @@ async function loadModel(kind) {
   hiMeshes.length = 0;
   eyeMesh = null;
   eyeMaterial = null;
+  mandibles.length = 0;
   outlineMats.length = 0;
   outlineMeshes.length = 0;
 
@@ -1009,6 +1060,7 @@ async function loadModel(kind) {
     }
   }
 
+  collectMandibles();
   group.add(model);
   applyHi();
   applySide();
@@ -1146,12 +1198,13 @@ const MODE = { flat: 0, two: 1, lit: 2 };
 
 // 把產生陰影的平行光擺到模型上方，並把陰影相機縮到剛好框住模型 ——
 // 範圍越小，2048² 的陰影貼圖在模型上的解析度就越高。
+// 最後一次用的光線方向，followSun() 要用
+const _sunDir = new THREE.Vector3(0, 1, 0);
 function placeSun(dir) {
-  const { center, radius: r } = bounds;
+  const { radius: r } = bounds;
+  _sunDir.copy(dir);
   sun.castShadow = els.shadowOn.checked;
-  sun.position.copy(center).addScaledVector(dir, r * 4);
-  sun.target.position.copy(center);
-  sun.target.updateMatrixWorld();
+  followSun();
 
   const c = sun.shadow.camera;
   c.left = -r * 1.15;
@@ -1165,6 +1218,19 @@ function placeSun(dir) {
   // 螞蟻的腿很細，推太多取樣點會跑出腿外面，自我遮蔽就沒了 ——
   // 實測 r*0.02 只剩 217 個受影響像素，r*0.002 有 305 個，所以取小值。
   sun.shadow.normalBias = r * 0.002;
+}
+
+// 陰影相機的視錐只有 2.3r 寬（故意縮到最小，換取陰影貼圖的解析度），
+// 所以它必須跟著螞蟻走—— 不跟的話，螞蟻一走出那個框影子就消失。
+// 螞蟻載入時在原點，所以走了多遠 = model.position。
+const _sunAt = new THREE.Vector3();
+function followSun() {
+  const { center, radius: r } = bounds;
+  _sunAt.copy(center);
+  if (model) _sunAt.add(model.position);
+  sun.position.copy(_sunAt).addScaledVector(_sunDir, r * 4);
+  sun.target.position.copy(_sunAt);
+  sun.target.updateMatrixWorld();
 }
 
 // 仰角／方位角 → 世界空間的單位方向向量（由表面指向光源）
@@ -1182,6 +1248,7 @@ function applyShading() {
   const bn = Number(els.bn.value);
   const bw = Number(els.bw.value);
   const bk = Number(els.bk.value);
+  const jaw = Number(els.jaw.value);
   const hir = Number(els.hir.value);
   const hiw = Number(els.hiw.value);
   const rimOn = els.rimOn.checked ? 1 : 0;
@@ -1199,6 +1266,7 @@ function applyShading() {
   els.bnOut.textContent = bn.toFixed(1);
   els.bwOut.textContent = bw.toFixed(2);
   els.bkOut.textContent = bk.toFixed(2);
+  els.jawOut.textContent = Math.round(jaw * Math.abs(MANDIBLE_OPEN_DEG)) + '°';
   els.hirOut.textContent = hir.toFixed(5);
   els.hiwOut.textContent = hiw.toFixed(5);
   els.rimwOut.textContent = rimW.toFixed(4);
@@ -1269,7 +1337,7 @@ function applySide() {
   for (const m of materials) m.side = side;
 }
 
-for (const el of [els.thr, els.vw, els.bn, els.bw, els.bk, els.hir, els.hiw, els.rimw, els.opx, els.base, els.elev, els.azim, els.amb, els.spec, els.shin, els.shadow]) el.oninput = applyShading;
+for (const el of [els.thr, els.vw, els.bn, els.bw, els.bk, els.hir, els.hiw, els.rimw, els.opx, els.jaw, els.base, els.elev, els.azim, els.amb, els.spec, els.shin, els.shadow]) el.oninput = applyShading;
 els.shadowOn.onchange = applyShading;
 els.rimOn.onchange = applyShading;
 els.groundOn.onchange = applyShading;
@@ -1293,6 +1361,7 @@ function applyWalkUI() {
   els.lapsRow.hidden = !auto;
   els.turnRow.hidden = !key;
   els.dpad.hidden = !key;
+  els.bitepad.hidden = !key;
   if (!key) { for (const k in KEYS) KEYS[k] = 0; releaseAllDpad(); }
   els.follow.parentElement.hidden = !(auto || key);
   const laps = Number(els.laps.value);
@@ -1301,7 +1370,7 @@ function applyWalkUI() {
   if (key) {
     // 方向鍵模式一定要拔掉 Root 位移，否則會疊加兩份前進
     if (!els.inPlace.checked) { els.inPlace.checked = true; rebuildAction(); }
-    els.play.textContent = '（方向鍵控制）';
+    els.play.textContent = '（方向鍵 / WSAD 控制）';
   } else {
     heading = 0;
     if (model) { model.rotation.y = 0; model.position.set(0, 0, 0); }
@@ -1339,17 +1408,18 @@ addEventListener('resize', relayout);
 // 但 resize 事件不會自己觸發，所以要手動跑一次 relayout()。
 const panelToggle = document.getElementById('panel-toggle');
 function setPanel(hidden) {
-  document.body.classList.toggle('panel-hidden', hidden);
+  document.body.classList.toggle('panel-open', !hidden);
   panelToggle.setAttribute('aria-expanded', String(!hidden));
   panelToggle.textContent = hidden ? '☰' : '✕';
   panelToggle.setAttribute('aria-label', hidden ? '展開面板' : '收合面板');
   relayout();
 }
 panelToggle.addEventListener('click', () => {
-  setPanel(!document.body.classList.contains('panel-hidden'));
+  setPanel(document.body.classList.contains('panel-open'));
 });
-// 窄螢幕一開始就收起來，讓螞蟻佔滿畫面
-setPanel(innerWidth <= 700);
+// 預設收合，讓螞蟻佔滿畫面；要調參數再按 ☰。
+// CSS 那邊也是預設收合（不會先閃一下面板），這行只是把 aria 跟 ☰/✕ 的字對齊。
+setPanel(true);
 
 // ---------------------------------------------------------------- 主迴圈
 
@@ -1409,27 +1479,35 @@ function updateEyeSpace() {
 // 螞蟻在模型空間朝 +Z（見 gltf/README.md 的座標軸更正），
 // 所以朝向角 heading 對應的前進向量是 (sin h, 0, cos h)。
 const KEYS = { ArrowUp: 0, ArrowDown: 0, ArrowLeft: 0, ArrowRight: 0 };
+// WSAD 跟方向鍵等價。比對 `e.code` 而不是 `e.key`：`code` 是**實體鍵位**，
+// 大寫鎖定、Shift、或注音／日文輸入法都不會影響它；`key` 會變成 'W' 或〔〕。
+const WSAD = { KeyW: 'ArrowUp', KeyS: 'ArrowDown', KeyA: 'ArrowLeft', KeyD: 'ArrowRight' };
+const keyName = (e) => (e.key in KEYS ? e.key : WSAD[e.code] || null);
 let heading = 0;
 
 addEventListener('keydown', (e) => {
-  if (!(e.key in KEYS)) return;
+  if (e.code === 'Space') { e.preventDefault(); bite(); return; }
+  const k = keyName(e);
+  if (!k) return;
   if (!els.keys.checked) return;
-  KEYS[e.key] = 1;
+  KEYS[k] = 1;
   e.preventDefault();          // 不然方向鍵會捲動頁面
 });
 addEventListener('keyup', (e) => {
-  if (!(e.key in KEYS)) return;
-  KEYS[e.key] = 0;
+  const k = keyName(e);
+  if (!k) return;
+  KEYS[k] = 0;
 });
 addEventListener('blur', () => { for (const k in KEYS) KEYS[k] = 0; releaseAllDpad(); });
 
 // 虛擬方向鍵：跟實體方向鍵共用同一組 KEYS 旗標。
 // 用 pointer 事件而不是 click，才能「按住持續前進」；
 // setPointerCapture 讓手指滑出按鈕外面也收得到 pointerup，不會卡在按下狀態。
-const dpadBtns = [...document.querySelectorAll('.dpad-btn')];
+const dpadBtns = [...document.querySelectorAll('.dpad-btn')];   // bite 鈕不在內，它不需要「按住」
 function releaseAllDpad() {
   for (const b of dpadBtns) b.classList.remove('active');
 }
+els.biteBtn?.addEventListener('pointerdown', (e) => { e.preventDefault(); bite(); });
 for (const btn of dpadBtns) {
   const key = btn.dataset.key;
   const press = (e) => {
@@ -1495,6 +1573,65 @@ function advanceWalk(dt) {
   }
 }
 
+// ---------------------------------------------------------------- 大顎開合
+// 鉸鏈軸：骨架在 Blender 用 align_roll 把兩邊大顎的轉軸對齊成同一條橫軸，
+// 換算到 glTF 之後是骨頭的區域 X 軸。實測兩根的世界 X 軸是
+// MandibleL (-0.996, 0, -0.094) / MandibleR (-0.996, 0, 0.088) —— 幾乎相同，
+// 所以是共用一條鉸鏈、**左右同號**，不是鏡像的反號。
+const MANDIBLE_AXIS = new THREE.Vector3(1, 0, 0);
+// 負號 = 往下張開（離開頭上那根角），正號 = 往上夾。
+// 42° = 滑桿拉到底的張開量；-0.28 × 42° = 11.8° 是咬下去時越過靜置位的量。
+const MANDIBLE_OPEN_DEG = -42;
+// 骨頭在 Blender 叫 Mandible.L / Mandible.R，但 GLTFLoader 會跑
+// PropertyBinding.sanitizeNodeName，把非 \w 的字元（包括那個點）拿掉，
+// 所以場景裡實際是 MandibleL / MandibleR。兩種寫法都接。
+const MANDIBLE_RE = /^Mandible[._-]?([LR])$/i;
+
+function collectMandibles() {
+  model.traverse((o) => {
+    if (!o.isBone || !MANDIBLE_RE.test(o.name)) return;
+    mandibles.push({ bone: o, rest: o.quaternion.clone() });
+  });
+  if (false) {
+    console.log('大顎骨頭：' + mandibles.map((m) => m.bone.name).join(', '));
+    // 開發時把場景採出來，骨架相關的毛病只能靠 console 量
+    window.__ant = { THREE, scene, model, mandibles, camera, controls };
+  }
+}
+
+// 咬一下：先張開，再往上甩回去夾住頭上那根角，最後回到滑桿的位置。
+// 地獄蟻（Haidomyrmecinae）的大顎是在矢狀面上「往上」合的，把獵物壓在角上，
+// 跟現代蟻左右合的方向不一樣，所以這個動作很值得特別做出來。
+// null = 跟著滑桿，這樣咬完不管滑桿在哪都不會跳一下。
+const BITE_T = [0, 0.14, 0.20, 0.40];
+const BITE_V = [null, 1, -0.28, null];
+let biteT = -1;
+function bite() { biteT = 0; }
+
+function biteAmount(dt, manual) {
+  if (biteT < 0) return manual;
+  biteT += dt;
+  if (biteT >= BITE_T[BITE_T.length - 1]) { biteT = -1; return manual; }
+  let i = 0;
+  while (biteT > BITE_T[i + 1]) i++;
+  const a = BITE_V[i] === null ? manual : BITE_V[i];
+  const b = BITE_V[i + 1] === null ? manual : BITE_V[i + 1];
+  let u = (biteT - BITE_T[i]) / (BITE_T[i + 1] - BITE_T[i]);
+  u = u * u * (3 - 2 * u);
+  return a + (b - a) * u;
+}
+
+const _mq = new THREE.Quaternion();
+function updateMandibles(dt) {
+  if (!mandibles.length) return;
+  const rad = THREE.MathUtils.degToRad(MANDIBLE_OPEN_DEG) * biteAmount(dt, Number(els.jaw.value));
+  for (const m of mandibles) {
+    _mq.setFromAxisAngle(MANDIBLE_AXIS, rad);
+    // 後乘 = 繞骨頭自己的軸轉，也就是鉸鏈
+    m.bone.quaternion.copy(m.rest).multiply(_mq);
+  }
+}
+
 const clock = new THREE.Clock();
 let frames = 0;
 let fpsTime = 0;
@@ -1512,7 +1649,9 @@ renderer.setAnimationLoop(() => {
       t.toFixed(2) + ' / ' + target.toFixed(2) + ' s' +
       '（clip ' + d.toFixed(6) + ' s × ' + (d / target).toFixed(4) + '）';
   }
+  updateMandibles(dt);     // 必須在 mixer.update() 之後，否則會被寫回靜置值
   advanceWalk(dt);
+  followSun();          // 陰影視錐跟著走，不然走出框影子就沒了
   updateEyeSpace();
   updateOutlineScale();
   controls.update();
