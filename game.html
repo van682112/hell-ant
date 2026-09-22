@@ -159,10 +159,12 @@ canvas { display: block; position: fixed; inset: 0; }
 .bite-btn:disabled { opacity: .45; cursor: default; }
 
 @media (max-width: 700px) {
-  #dpad { left: 12px; bottom: 12px; grid-template-columns: repeat(3, 96px); grid-template-rows: repeat(3, 96px); }
+  /* 手機上 96px 的按鈕會把螞蟻蓋掉一大半，邊長減半到 48px；
+     字形也等比例縮，不然 38px 的箭頭塞不進 48px 的框。 */
+  #dpad { left: 12px; bottom: 12px; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px); }
   #bitepad { right: 12px; bottom: 12px; }
-  .dpad-btn, .bite-btn { width: 96px; height: 96px; font-size: 38px; }
-  .bite-btn { font-size: 26px; }
+  .dpad-btn, .bite-btn { width: 48px; height: 48px; font-size: 19px; }
+  .bite-btn { font-size: 13px; }
   #hud { top: 10px; }
   #bar { top: 84px; }
 }
