@@ -1,0 +1,1507 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>地獄蟻獵食 — 咬準時機</title>
+<style>
+/* 地獄蟻獵食 —— 遊戲頁。跟展示頁 (ant.css) 分開：
+   這裡沒有控制面板，畫布吃滿整個視窗，只有 HUD 與按鍵。 */
+
+:root {
+  --panel: #161b22;
+  --line: #30363d;
+  --text: #e6edf3;
+  --dim: #8b949e;
+  --accent: #58a6ff;
+  --good: #5fbfb3;
+  --bad: #f85149;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0d1117;
+  color: var(--text);
+  font: 13px/1.5 "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+canvas { display: block; position: fixed; inset: 0; }
+
+/* ---------------------------------------------------------------- HUD */
+#hud {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(22, 27, 34, 0.82);
+  backdrop-filter: blur(8px);
+}
+#hud .stat { display: flex; flex-direction: column; align-items: center; min-width: 62px; }
+#hud .k { color: var(--dim); font-size: 10px; letter-spacing: .08em; }
+#hud .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+#hud .best .v { color: var(--dim); font-size: 16px; }
+#hud .v.bump { animation: bump 240ms ease-out; }
+@keyframes bump {
+  0% { transform: scale(1); color: var(--good); }
+  40% { transform: scale(1.5); color: var(--good); }
+  100% { transform: scale(1); }
+}
+#time.low { color: var(--bad); }
+
+/* ---------------------------------------------------------------- 咬合節奏條
+   三段的寬度就是 BITE_T 的實際比例（0.14 / 0.06 / 0.20 秒），
+   中間那段是判定窗 —— 玩家看得到自己按得準不準。 */
+#bar {
+  position: fixed;
+  top: 92px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  width: 240px;
+  height: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(22, 27, 34, 0.82);
+}
+#bar[hidden] { display: none; }
+#bar .seg { height: 100%; }
+#bar .s0 { flex: 14; background: rgba(139, 148, 158, 0.35); }   /* 0.14 s 張開 */
+#bar .s1 { flex: 6;  background: var(--good); }                  /* 0.06 s 夾合＝判定 */
+#bar .s2 { flex: 20; background: rgba(139, 148, 158, 0.18); }    /* 0.20 s 回位 */
+#bar-head {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+}
+
+/* 抓到／落空時整個畫面閃一下，不用看 HUD 也知道結果 */
+#flash {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms ease-out;
+}
+#flash.hit  { background: radial-gradient(circle, rgba(95,191,179,0) 55%, rgba(95,191,179,0.45) 100%); opacity: 1; transition: none; }
+#flash.miss { background: radial-gradient(circle, rgba(248,81,73,0) 60%, rgba(248,81,73,0.32) 100%); opacity: 1; transition: none; }
+
+/* ---------------------------------------------------------------- 按鍵
+   跟展示頁同一套尺寸：十字鍵左下、bite 右下，邊長 112 px。 */
+#dpad {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, 112px);
+  grid-template-rows: repeat(3, 112px);
+  gap: 6px;
+  z-index: 5;
+  touch-action: none;
+}
+#dpad[hidden], #bitepad[hidden] { display: none; }
+
+#bitepad {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 5;
+  touch-action: none;
+}
+
+.dpad-btn, .bite-btn {
+  width: 112px;
+  height: 112px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(22, 27, 34, 0.78);
+  color: var(--text);
+  font: 44px/1 inherit;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 90ms, border-color 90ms;
+}
+.dpad-btn:hover, .bite-btn:hover { background: rgba(48, 54, 61, 0.85); }
+.dpad-btn.active { background: var(--accent); border-color: var(--accent); color: #0d1117; }
+.dpad-btn.up    { grid-area: 1 / 2; }
+.dpad-btn.left  { grid-area: 2 / 1; }
+.dpad-btn.right { grid-area: 2 / 3; }
+.dpad-btn.down  { grid-area: 3 / 2; }
+
+.bite-btn {
+  font-size: 30px;
+  border-color: color-mix(in srgb, var(--good) 55%, var(--line));
+}
+.bite-btn:active, .bite-btn.armed {
+  background: var(--good);
+  border-color: var(--good);
+  color: #0d1117;
+}
+.bite-btn:disabled { opacity: .45; cursor: default; }
+
+@media (max-width: 700px) {
+  #dpad { left: 12px; bottom: 12px; grid-template-columns: repeat(3, 96px); grid-template-rows: repeat(3, 96px); }
+  #bitepad { right: 12px; bottom: 12px; }
+  .dpad-btn, .bite-btn { width: 96px; height: 96px; font-size: 38px; }
+  .bite-btn { font-size: 26px; }
+  #hud { top: 10px; }
+  #bar { top: 84px; }
+}
+
+/* ---------------------------------------------------------------- 開場／結算 */
+#overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(13, 17, 23, 0.72);
+  backdrop-filter: blur(4px);
+}
+#overlay[hidden] { display: none; }
+
+#overlay .card {
+  max-width: 460px;
+  padding: 26px 28px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(22, 27, 34, 0.96);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+#overlay h1 { margin: 0 0 10px; font-size: 22px; }
+#overlay .lead { margin: 0 0 16px; color: var(--text); font-size: 13px; }
+#overlay .warn { margin: 14px 0 18px; color: var(--dim); font-size: 12px; }
+#overlay .keys { margin: 0 auto; border-collapse: collapse; font-size: 12px; }
+#overlay .keys td { padding: 3px 10px; }
+#overlay .keys td:first-child { color: var(--accent); text-align: right; white-space: nowrap; }
+#overlay .keys td:last-child { color: var(--dim); text-align: left; }
+#overlay button {
+  margin-top: 6px;
+  padding: 10px 26px;
+  border: 1px solid var(--good);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--good);
+  font: 600 15px/1 inherit;
+  cursor: pointer;
+}
+#overlay button:hover { background: var(--good); color: #0d1117; }
+
+#overlay .result { margin: 0 0 6px; font-size: 44px; font-weight: 700; line-height: 1; }
+#overlay .sub { margin: 0 0 16px; color: var(--dim); font-size: 12px; }
+
+#status {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #21262d;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+#status.show { opacity: 1; }
+#status.error { border-color: var(--bad); color: #ff7b72; }
+
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+  <div id="hud">
+    <div class="stat"><span class="k">分數</span><span class="v" id="score">0</span></div>
+    <div class="stat"><span class="k">連擊</span><span class="v" id="combo">×1</span></div>
+    <div class="stat"><span class="k">剩餘</span><span class="v" id="time">60.0</span></div>
+    <div class="stat best"><span class="k">最佳</span><span class="v" id="best">0</span></div>
+  </div>
+
+  <!-- 咬合節奏條：張開 → 夾合（判定窗）→ 回位，三段照實際包絡的長度比例 -->
+  <div id="bar" hidden>
+    <div class="seg s0"></div><div class="seg s1"></div><div class="seg s2"></div>
+    <div id="bar-head"></div>
+  </div>
+
+  <div id="flash"></div>
+
+  <div id="dpad" hidden>
+    <button type="button" class="dpad-btn up"    data-key="ArrowUp"    aria-label="前進">↑</button>
+    <button type="button" class="dpad-btn left"  data-key="ArrowLeft"  aria-label="左轉">←</button>
+    <button type="button" class="dpad-btn right" data-key="ArrowRight" aria-label="右轉">→</button>
+    <button type="button" class="dpad-btn down"  data-key="ArrowDown"  aria-label="後退">↓</button>
+  </div>
+  <div id="bitepad" hidden>
+    <button type="button" id="bite-btn" class="bite-btn" aria-label="咬合">bite</button>
+  </div>
+
+  <div id="overlay">
+    <div class="card">
+      <h1>地獄蟻獵食</h1>
+      <p class="lead" id="lead">
+        地獄蟻的大顎是往<b>上</b>合的，把獵物壓在頭上那根角。<br />
+        按下去後大顎先張開 <b>0.14 秒</b>，再用 <b>60 毫秒</b>往上夾 —— 只有那 60 毫秒算數。
+      </p>
+      <table class="keys">
+        <tr><td>↑↓ / W S</td><td>前進、後退</td></tr>
+        <tr><td>←→ / A D</td><td>轉向</td></tr>
+        <tr><td>空白鍵 / bite</td><td>咬</td></tr>
+      </table>
+      <p class="warn">
+        跳蟲會<b>彈走</b>：彈之前會先壓扁蓄力 0.22 秒，那是預告。<br />
+        你咬出去的瞬間它也會察覺，0.12 秒後彈開 —— 所以要<b>提前按</b>。
+      </p>
+      <button type="button" id="start">開始（60 秒）</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+<script type="module">
+// 地獄蟻獵食 —— 咬準時機
+//
+// 玩法只有一個動詞：咬。地獄蟻（Haidomyrmecinae）的大顎是在矢狀面上「往上」合的，
+// 把獵物壓在頭上那根角，所以一次咬合是三段（見 ant-core.js 的 BITE_T / BITE_V）：
+//
+//   0    → 0.14 s   往下張開到 -41.8°
+//   0.14 → 0.20 s   往上甩過靜置位到 +11.5°   ← 判定就在這 60 毫秒
+//   0.20 → 0.40 s   回位
+//
+// 判定窗本來就存在，遊戲只是把它變成規則：跳蟲在你「開始咬」之後 0.12 秒察覺並彈開，
+// 所以按早了大顎還在張、按晚了獵物已經跑掉。
+//
+// 著色完全沿用展示頁（ant-core.js），這一頁不碰任何著色參數。
+
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+// ===== 以下內嵌自 src/ant-core.js（展示頁與遊戲頁共用）=====
+// 展示頁（ant.html）與遊戲頁（game.html）共用的著色核心。
+// 這裡不碰 DOM、不碰面板 —— 只有 shader、色票、材質工廠與量好的幾何常數。
+// 改這裡兩頁同步改到，不會只有一邊對。
+
+
+
+// ---------------------------------------------------------------- 即時描邊
+// Blender 的反向外殼是「沿法線外推 thickness（世界單位）」，鏡頭推近線就變粗。
+// 這裡改成在頂點著色器裡外推「固定像素數」換算出來的世界長度：
+//   每像素的世界長度 = 2 * 視深 * tan(fov/2) / 視埠高   （正交相機則是定值）
+// 每頂點再乘上 COLOR_0.b（= Blender 的 HullW，避免高曲率處自我穿插）。
+const OUTLINE_VERT = /* glsl */ `
+  #include <common>
+  #include <color_pars_vertex>
+  #include <skinning_pars_vertex>
+  uniform float uOutlinePx;
+  uniform float uPxScale;     // PERSP: 2*tan(vfov/2)/viewportH   ORTHO: (top-bottom)/viewportH
+  uniform float uOrtho;       // 1 = 正交
+  void main() {
+    #include <color_vertex>
+    #include <beginnormal_vertex>
+    #include <skinbase_vertex>
+    #include <skinnormal_vertex>
+    #include <defaultnormal_vertex>
+    #include <begin_vertex>
+    #include <skinning_vertex>
+    vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+    vec3 nv = normalize(normalMatrix * objectNormal);
+    float unitsPerPx = mix(-mv.z * uPxScale, uPxScale, uOrtho);
+    #if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )
+      float hw = vColor.b;
+    #else
+      float hw = 1.0;
+    #endif
+    mv.xyz += nv * (uOutlinePx * unitsPerPx * hw);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const OUTLINE_FRAG = /* glsl */ `
+  uniform vec3 uOutlineColor;
+  void main() {
+    gl_FragColor = vec4(uOutlineColor, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+const PALETTE = {
+  AntT_Head:     ['#5A4830', '#463824'],
+  AntT_Mandible: ['#5A4830', '#4A3B26'],
+  AntT_Thorax:   ['#5A4230', '#463324'],
+  AntT_Gaster:   ['#664E30', '#47351F'],
+  AntT_Antenna:  ['#483624', '#3B2B1C'],
+  AntT_Leg:      ['#483624', '#3B2B1C'],
+  Ant_Eye:       ['#311F11', '#311F11'],
+  Ant_Hi:        ['#E3D7C7', '#E3D7C7'],
+  Ant_Outline:   ['#302010', '#302010'],
+  // 遊戲頁的獵物。地面是橄欖色 #A79C4C，所以獵物取青綠才跳得出來。
+  Prey_Body:     ['#58B3A8', '#3E8078'],
+  Prey_Outline:  ['#1E3A36', '#1E3A36'],
+};
+const WORLD_BG = '#CFC9BC';
+const FALLBACK = ['#FF00FF', '#AA00AA']; // 沒對到名字的材質，故意刺眼
+
+const FPS = 24;
+const ROOT_TRACK = 'Root.position';
+// 每個走路循環的前進距離（Blender 量測：Root 骨每 16 格累積 0.436364 單位）
+const STRIDE_PER_CYCLE = 0.436364;
+
+// ---------------------------------------------------------------- 著色器
+
+// 平面風的重點是「顏色就是指定的顏色」，所以走 unlit：不吃燈光、不吃 IBL。
+// 頂點著色器沿用 three 內建的 skinning chunk，蒙皮才會跟著骨架動。
+// chunk 順序比照 three 內建的 ShadowMaterial（shadow_vert.glsl.js），
+// shadowmap_vertex 需要 worldpos_vertex 先算出 worldPosition。
+const VERT = /* glsl */ `
+  #include <common>
+  #include <color_pars_vertex>
+  #include <skinning_pars_vertex>
+  #include <shadowmap_pars_vertex>
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vNW;
+  varying vec3 vWP;
+  varying vec3 vOP;
+  attribute vec2 uv1;          // = glTF 的 TEXCOORD_1（EyeUV，靜置姿勢的眼睛座標）
+  varying vec2 vEyeUV;
+  void main() {
+    #include <color_vertex>
+    #include <beginnormal_vertex>
+    #include <skinbase_vertex>
+    #include <skinnormal_vertex>
+    vNW = normalize(mat3(modelMatrix) * objectNormal);  // 世界空間法線（蒙皮後）
+    #include <defaultnormal_vertex>
+    #include <begin_vertex>
+    #include <skinning_vertex>
+    vEyeUV = uv1;
+    vOP = transformed;                                  // 物件空間位置（蒙皮後）
+    vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;   // 世界空間位置（蒙皮後）
+    #include <project_vertex>
+    #include <worldpos_vertex>
+    #include <shadowmap_vertex>
+    vN = normalize(transformedNormal);   // 視空間法線
+    vV = normalize(-mvPosition.xyz);     // 視空間視線方向
+  }
+`;
+
+// uMode：0 = 單色平面，1 = 雙色調（相機相對），2 = 單色 + 頂光（Lambert）
+const FRAG = /* glsl */ `
+  #include <common>
+  #include <packing>
+  #include <bsdfs>
+  #include <lights_pars_begin>
+  #include <shadowmap_pars_fragment>
+  #include <shadowmask_pars_fragment>
+  #include <color_pars_fragment>
+  // three 只在材質開了 vertexColors 時才宣告 vColor（COLOR_0 是 VEC4 -> USE_COLOR_ALPHA）。
+  // 沒有這個保護的話，其他材質會編譯失敗：'vColor' : undeclared identifier
+  #if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )
+    #define HAS_VCOLOR 1
+  #endif
+  uniform vec3  uLight;
+  uniform vec3  uDark;
+  uniform vec3  uBase;
+  uniform vec3  uLightDir;
+  uniform float uThreshold;
+  uniform float uAmbient;
+  uniform float uMode;
+  uniform float uKeepOwnColor;
+  uniform float uUnlit;
+  uniform float uSpecular;
+  uniform float uShininess;
+  uniform float uShadow;
+  uniform float uViewWeight;
+  uniform float uBandN;
+  uniform float uBandW;
+  uniform float uBandK;
+  uniform float uUseBands;
+  // 眼睛解析高光（從 Blender 的 Ant_Eye 節點群搬過來，常數已轉成 Y-up）
+  uniform float uEyeHi;
+  uniform vec3  uEyeC;
+  uniform vec3  uEyeU;
+  uniform vec3  uEyeV;
+  uniform vec3  uEyeN;
+  uniform vec3  uHiColor;
+  uniform vec3  uCamObj;      // 相機位置（物件空間）
+  uniform vec3  uLightObj;    // 光方向（物件空間）
+  uniform float uKU;
+  uniform float uKV;
+  uniform float uEyeA;
+  uniform float uEyeB;
+  uniform float uQmax;
+  uniform float uHiR;
+  uniform float uHiW;
+  // 眼圈（材質畫的線，反向外殼畫不出來 —— 它只在剪影出現）
+  uniform float uUseRim;
+  uniform float uRimW;
+  uniform float uRimS;
+  uniform float uRimScale;
+  uniform vec3  uRimColor;
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vNW;
+  varying vec3 vWP;
+  varying vec3 vOP;
+  varying vec2 vEyeUV;
+  uniform float uEyeSU;        // EyeUV 的壓縮倍率（Blender 烘的時候用 4.0）
+
+  // Blender 的做法:把眼睛當成一個解析圓頂,用半向量 H 直接「解」出反射點在
+  // 眼睛平面上的座標 (u*, v*),再量該像素離那個點多遠 —— 不是 Blinn-Phong。
+  // 兩顆眼睛共用同一組常數,靠 x 的鏡射處理左右。
+  vec3 eyeHighlight(vec3 base) {
+    float sx = sign(vOP.x);
+    // u, v 改從 EyeUV 讀 —— 那是「靜置姿勢」烘死的逐頂點座標。
+    // 原本用「蒙皮後的位置 − 固定的中心 C」去算，螞蟻一走整隻位移，
+    // 眼睛就從那個固定框架滑出去（實測位移達 7 個半長軸），高光因此亂跑。
+    float u = (vEyeUV.x * 2.0 - 1.0) * uEyeSU * uEyeA;
+    float v = (vEyeUV.y * 2.0 - 1.0) * uEyeSU * uEyeB;
+
+    vec3 I = normalize(uCamObj - vOP);              // = Blender 的 Incoming
+    vec3 H = normalize(normalize(uLightObj) + I);
+    vec3 Hm = vec3(H.x * sx, H.y, H.z);             // 鏡到 +X 空間
+    float hu = dot(Hm, uEyeU);
+    float hv = dot(Hm, uEyeV);
+    float hn = max(dot(Hm, uEyeN), 0.05);
+
+    float us = (hu / hn) / uKU;                     // 反射點
+    float vs = (hv / hn) / uKV;
+    float qu = us / uEyeA, qv = vs / uEyeB;
+    float q  = sqrt(qu * qu + qv * qv);
+    float sc = min(1.0, uQmax / max(q, 1e-6));      // 夾在眼睛內
+    float dist = length(vec2(u - us * sc, v - vs * sc));
+
+    float hi = 1.0 - smoothstep(uHiR - uHiW, uHiR + uHiW, dist);
+    return mix(base, uHiColor, hi);
+  }
+
+  void main() {
+    vec3 col;
+    if (uMode > 1.5 && uUnlit > 0.5) {
+      // 描邊外殼是輪廓不是表面，任何模式都維持純色、不受光。
+      // 讓它吃光會在整隻螞蟻外面糊出一層受光的殼，看起來像半透明外骨骼。
+      col = uLight;
+    } else if (uMode > 1.5) {
+      // 無限遠平行光：光線互相平行，只有方向沒有位置
+      vec3 nw = normalize(vNW);
+      if (!gl_FrontFacing) nw = -nw;
+      vec3 L = normalize(uLightDir);
+      float ndl = max(dot(nw, L), 0.0);
+
+      // getShadowMask()：1.0 = 完全受光，0.0 = 完全在陰影裡。
+      // 用 uShadow 調強度，陰影只壓到環境補光的水平，不會變全黑。
+      ndl *= mix(1.0, getShadowMask(), uShadow);
+
+      if (uKeepOwnColor > 0.5) {
+        // 眼睛：保留原色 + Blinn-Phong 高光。高光位置由光向量與視線共同決定，
+        // 所以轉光源時亮點會在眼球上移動。
+        vec3 V = normalize(cameraPosition - vWP);
+        vec3 H = normalize(L + V);
+        float spec = pow(max(dot(nw, H), 0.0), uShininess) * uSpecular;
+        col = uLight * (uAmbient + (1.0 - uAmbient) * ndl) + vec3(spec);
+      } else {
+        col = uBase * (uAmbient + (1.0 - uAmbient) * ndl);
+      }
+    } else if (uMode > 0.5) {
+      // 雙色調 —— 跟 Blender 對齊的版本。
+      // Blender: dir = normalize(Incoming * SCALE + L)，Incoming 是「表面 -> 相機」，
+      //          lit = dot(Normal, dir) > 0，Mix 的 A=暗 B=亮。
+      // 全部在世界空間算，因為 L 是世界空間的太陽方向。
+      vec3 nw = normalize(vNW);
+      if (!gl_FrontFacing) nw = -nw;
+      vec3 I = normalize(cameraPosition - vWP);        // = Blender 的 Incoming
+      vec3 dir = normalize(I * uViewWeight + normalize(uLightDir));
+      float lit = step(uThreshold, dot(nw, dir));
+      col = mix(uDark, uLight, lit);
+      if (uEyeHi > 0.5) col = eyeHighlight(uLight);   // 眼睛:底色固定,不吃兩色調
+      // 眼圈:COLOR_0.g 存的是「到眼睛島嶼邊界的距離 / uRimScale」。
+      // 線要跨過邊界,所以頭與眼睛兩邊都畫,各自給不同寬度。
+      #ifdef HAS_VCOLOR
+      if (uUseRim > 0.5) {
+        float dr = vColor.g * uRimScale;
+        float rim = 1.0 - smoothstep(uRimW - uRimS, uRimW + uRimS, dr);
+        col = mix(col, uRimColor, rim);
+      }
+      #endif
+    } else {
+      col = uLight;                                     // 單色平面
+    }
+
+    // 腹部條紋:COLOR_0.r 存的是腹部沿長軸的正規化座標(Blender 的 GasterAxis)。
+    // 用乘法壓暗而不是換色,兩色調與太陽方向才能在條紋底下繼續作用。
+    #ifdef HAS_VCOLOR
+    if (uUseBands > 0.5 && uBandN > 0.0) {
+      float band = step(fract(vColor.r * uBandN), uBandW);
+      col *= mix(1.0, uBandK, band);
+    }
+    #endif
+    gl_FragColor = vec4(col, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+const KEEP_OWN_COLOR = new Set(['Ant_Eye']);
+// 永遠不受光的材質（描邊外殼：它是輪廓，不是表面）
+const UNLIT = new Set(['Ant_Outline']);
+// 需要讀 COLOR_0 的材質（腹部條紋）
+const USE_BANDS = new Set(['AntT_Gaster']);
+// 眼圈：線跨過眼睛島嶼的邊界，所以頭與眼睛兩側都要畫，寬度不同
+// （Blender 端 AntT_Head W=0.0040、Ant_Eye W=0.0015，柔度共用 0.0008）
+const RIM_W = { AntT_Head: 0.0040, Ant_Eye: 0.0015 };
+const RIM_S = 0.0008;
+const RIM_SCALE = 0.06;          // Blender 烘 COLOR_0.g 時用的上限
+const RIM_COLOR = '#302010';     // 與 Ant_Outline 同色
+// 眼睛解析高光的常數 —— 來源 Blender Ant_Eye 節點群，
+// 座標已從 Blender 的 Z-up 轉成 three 的 Y-up：(x, y, z) -> (x, z, -y)
+const EYE = {
+  C: new THREE.Vector3(0.172169, 0.135007, 0.309794),
+  U: new THREE.Vector3(0.061442, 0.590327, -0.804822),
+  V: new THREE.Vector3(0.591890, -0.670815, -0.446848),
+  N: new THREE.Vector3(0.803674, 0.448911, 0.390625),
+  KU: 12.799242,
+  KV: 34.224476,
+  a: 0.050468,   // 半長軸
+  b: 0.030863,   // 半短軸
+  qmax: 0.62,
+  R: 0.01275,    // 高光半徑
+  W: 0.0014,     // 邊緣柔度
+  SU: 4.0,       // EyeUV 烘進 [0,1] 時用的壓縮倍率（Blender 端同值）
+  color: '#E3D7C7',
+};
+
+function makeMaterial(name, side) {
+  const [light, dark] = PALETTE[name] || FALLBACK;
+  return new THREE.ShaderMaterial({
+    name,
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    side,
+    // 只有腹部需要頂點色；其他材質開了會多傳一份用不到的 attribute。
+    vertexColors: USE_BANDS.has(name) || RIM_W[name] !== undefined,
+    // getShadowMask() 需要 three 注入的燈光／陰影 uniform，
+    // 所以要 lights: true 並把 UniformsLib.lights 併進來。
+    lights: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.lights,
+      {
+        uLight: { value: new THREE.Color(light) },
+        uDark: { value: new THREE.Color(dark) },
+        uBase: { value: new THREE.Color('#8A7150') },
+        uLightDir: { value: new THREE.Vector3(0, 1, 0) },
+        uThreshold: { value: 0.0 },
+        uAmbient: { value: 0.15 },
+        uMode: { value: 1 }, // 1 = 雙色調（預設模式，與 ant.html 的 checked 一致）
+        uKeepOwnColor: { value: KEEP_OWN_COLOR.has(name) ? 1 : 0 },
+        uUnlit: { value: UNLIT.has(name) ? 1 : 0 },
+        uSpecular: { value: 0.35 },
+        uShininess: { value: 128 },
+        uShadow: { value: 1 },
+        uViewWeight: { value: 0.62 },   // Blender 的 VECT_MATH/SCALE
+        uBandN: { value: 3.0 },         // Blender 的 BandN
+        uBandW: { value: 0.60 },        // Blender 的 BandW
+        uBandK: { value: 0.62 },        // Blender 的 BandK
+        uUseBands: { value: USE_BANDS.has(name) ? 1 : 0 },
+        uEyeHi: { value: name === 'Ant_Eye' ? 1 : 0 },
+        uEyeC: { value: EYE.C.clone() },
+        uEyeU: { value: EYE.U.clone() },
+        uEyeV: { value: EYE.V.clone() },
+        uEyeN: { value: EYE.N.clone() },
+        uHiColor: { value: new THREE.Color(EYE.color) },
+        uCamObj: { value: new THREE.Vector3() },
+        uLightObj: { value: new THREE.Vector3(0, 1, 0) },
+        uKU: { value: EYE.KU },
+        uKV: { value: EYE.KV },
+        uEyeA: { value: EYE.a },
+        uEyeB: { value: EYE.b },
+        uQmax: { value: EYE.qmax },
+        uHiR: { value: EYE.R },
+        uHiW: { value: EYE.W },
+        uEyeSU: { value: EYE.SU },
+        uUseRim: { value: RIM_W[name] !== undefined ? 1 : 0 },
+        uRimW: { value: RIM_W[name] !== undefined ? RIM_W[name] : 0 },
+        uRimS: { value: RIM_S },
+        uRimScale: { value: RIM_SCALE },
+        uRimColor: { value: new THREE.Color(RIM_COLOR) },
+      },
+    ]),
+  });
+}
+
+// 地面：對齊 Blender 的做法（summary.md §6.4）——
+// 不是半透明的 ShadowMaterial，而是「受光 / 陰影」兩個平塗色硬邊切開。
+// Blender 那邊用 Diffuse -> Shader to RGB -> ColorRamp(CONSTANT)；
+// three.js 沒有 Shader to RGB，但 getShadowMask() 給的就是同一個東西。
+const GROUND_LIT = '#A79C4C';   // = Blender 的地面色（線性 0.3864,0.3325,0.0723）
+const GROUND_K = 0.60;          // Blender 的陰影深度係數
+
+const GROUND_VERT = /* glsl */ `
+  #include <common>
+  #include <shadowmap_pars_vertex>
+  void main() {
+    #include <beginnormal_vertex>
+    #include <defaultnormal_vertex>
+    #include <begin_vertex>
+    #include <project_vertex>
+    #include <worldpos_vertex>
+    #include <shadowmap_vertex>
+  }
+`;
+
+const GROUND_FRAG = /* glsl */ `
+  #include <common>
+  #include <packing>
+  #include <bsdfs>
+  #include <lights_pars_begin>
+  #include <shadowmap_pars_fragment>
+  #include <shadowmask_pars_fragment>
+  uniform vec3  uGroundLit;
+  uniform float uGroundK;
+  uniform float uGroundThr;
+  void main() {
+    float lit = step(uGroundThr, getShadowMask());   // 硬邊，等同 ColorRamp 的 CONSTANT
+    gl_FragColor = vec4(uGroundLit * mix(uGroundK, 1.0, lit), 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+// colorHex：給獵物用別的描邊色。
+// 注意 vertexColors 必須搭配真的有 COLOR_0：開了卻沒有該屬性的話，
+// WebGL 會給默認值 (0,0,0,1)，vColor.b = 0 → HullW = 0 → 根本不會描邊。
+function makeOutlineMaterial(colorHex) {
+  return new THREE.ShaderMaterial({
+    name: 'Ant_Outline_RT',
+    vertexShader: OUTLINE_VERT,
+    fragmentShader: OUTLINE_FRAG,
+    vertexColors: true,          // 讀 COLOR_0.b = HullW
+    side: THREE.BackSide,        // 反向外殼：只畫背面
+    uniforms: {
+      uOutlinePx: { value: 3.0 },          // 與 Blender 的 TARGET_PX 同值
+      uPxScale: { value: 0.001 },
+      uOrtho: { value: 0 },
+      uOutlineColor: { value: new THREE.Color(colorHex || PALETTE.Ant_Outline[0]) },
+    },
+  });
+}
+
+// ---------------------------------------------------------------- 大顎
+// 鉶鏈軸：兩根共用一條橫軸(骨架用 align_roll 對齊過)，所以左右同號。
+// 實測世界 X 軸：MandibleL (-0.996, 0, -0.094) / MandibleR (-0.996, 0, 0.088)。
+const MANDIBLE_AXIS = new THREE.Vector3(1, 0, 0);
+// 負號 = 往下張開（離開頭上那根角），正號 = 往上夾。
+const MANDIBLE_OPEN_DEG = -42;
+// GLTFLoader 會跑 PropertyBinding.sanitizeNodeName 把非 \w 的字元（包括那個點）砍掉，
+// 所以場景裡是 MandibleL / MandibleR，不是 Mandible.L。兩種寫法都接。
+const MANDIBLE_RE = /^Mandible[._-]?([LR])$/i;
+// 大顎尖端在骨頭本地空間的位置。量法：取權重 > 0.5 綁在該骨頭的頂點，
+// 套 boneInverse 轉到骨頭本地空間，取離原點最遠的那一點。
+// L 1144 個頂點 -> (-0.0350, 0.4810, -0.0826) 長 0.4893
+// R 1104 個頂點 -> ( 0.0593, 0.4797, -0.0850) 長 0.4908
+// （本地 +Y 就是骨頭長軸，Blender 的慣例。）
+const MANDIBLE_TIP = {
+  L: new THREE.Vector3(-0.0350, 0.4810, -0.0826),
+  R: new THREE.Vector3(0.0593, 0.4797, -0.0850),
+};
+
+// ---------------------------------------------------------------- 咬合包絡
+// 地獄蟻（Haidomyrmecinae）的大顎是在矢狀面上「往上」合的，把獵物壓在頭上那根角，
+// 所以咬不是單純的開→關，而是三段。null = 跟著滑桿／目前的開合量，
+// 這樣咬完不管停在哪都不會跳一下。
+const BITE_T = [0, 0.14, 0.20, 0.40];
+const BITE_V = [null, 1, -0.28, null];
+// segment 0 = 張開、1 = 往上甩（判定就在這 60 ms）、2 = 回位。
+function makeBiter() {
+  let t = -1;
+  let seg = -1;
+  return {
+    start() { t = 0; },
+    get active() { return t >= 0; },
+    get time() { return t; },
+    get segment() { return seg; },
+    amount(dt, manual) {
+      if (t < 0) { seg = -1; return manual; }
+      t += dt;
+      if (t >= BITE_T[BITE_T.length - 1]) { t = -1; seg = -1; return manual; }
+      let i = 0;
+      while (t > BITE_T[i + 1]) i++;
+      seg = i;
+      const a = BITE_V[i] === null ? manual : BITE_V[i];
+      const b = BITE_V[i + 1] === null ? manual : BITE_V[i + 1];
+      let u = (t - BITE_T[i]) / (BITE_T[i + 1] - BITE_T[i]);
+      u = u * u * (3 - 2 * u);
+      return a + (b - a) * u;
+    },
+  };
+}
+
+// ---------------------------------------------------------------- 待機擺動
+// 走路 clip 只有一個，停下來就會凍在某一格（半舉著腿）。這裡不另外做一段 clip，
+// 而是在混合器寫完之後，往上半身幾根骨頭疊一組慢速正弦 —— 腿完全不碰。
+//
+// ⚠️ 不能動 Root / Thorax_Rear：腿的 IK 在 Blender 端已經烘成 FK，
+//    轉這兩根會把六隻腳一起帶著跑，看起來就是在打滑。
+//
+// 各骨頭的局部軸在靜置姿勢下對應到什麼（從 glTF 累乘 TRS 算出來的世界方向）：
+//   Head              X (-1, 0, 0) 橫軸 -> 點頭      Z (0, 0.996, 0.084) 近似上 -> 左右轉
+//   Antenna_Scape.L   X (-0.187, 0, 0.982) 近似前 -> 上下抬   Z (-0.301, 0.952, -0.057) 近似上 -> 前後掃
+//   Antenna_Scape.R   X (-0.188, 0, -0.982)（跟 L 反向，所以同一個局部旋轉會左右對稱）
+//   Gaster            X (1, 0, 0) 橫軸 -> 腹部起伏
+//
+// 每根骨頭各自的週期都取不一樣、相位也錯開 —— 同步擺動看起來像機器。
+const _AX = { X: new THREE.Vector3(1, 0, 0), Y: new THREE.Vector3(0, 1, 0), Z: new THREE.Vector3(0, 0, 1) };
+const D = Math.PI / 180;
+
+// amp 是單邊振幅（度），period 是秒，phase 是週期的比例
+const IDLE_CHANNELS = {
+  Head:            [{ ax: 'Z', amp: 2.5, period: 5.2, phase: 0.00 },
+                    { ax: 'X', amp: 1.2, period: 3.7, phase: 0.31 }],
+  Antenna_ScapeL:  [{ ax: 'X', amp: 5.0, period: 2.9, phase: 0.00 },
+                    { ax: 'Z', amp: 7.0, period: 2.3, phase: 0.17 }],
+  Antenna_ScapeR:  [{ ax: 'X', amp: 5.0, period: 3.3, phase: 0.41 },
+                    { ax: 'Z', amp: 7.0, period: 2.7, phase: 0.63 }],
+  Antenna_FunicL:  [{ ax: 'X', amp: 6.0, period: 1.9, phase: 0.22 }],
+  Antenna_FunicR:  [{ ax: 'X', amp: 6.0, period: 2.1, phase: 0.58 }],
+  Gaster:          [{ ax: 'X', amp: 2.0, period: 2.6, phase: 0.00 }],
+};
+
+// weight 0 = 完全用混合器寫的姿勢（走路中），1 = 完全用待機姿勢。
+// 中間用 slerp，所以停下／起步的切換是平滑的，不需要另外做過場。
+function makeIdle(root) {
+  const chans = [];
+  root.traverse((o) => {
+    if (!o.isBone) return;
+    const spec = IDLE_CHANNELS[o.name];
+    if (spec) chans.push({ bone: o, rest: o.quaternion.clone(), spec });
+  });
+  const _q = new THREE.Quaternion();
+  const _t = new THREE.Quaternion();
+  let t = 0;
+  return {
+    get count() { return chans.length; },
+    update(dt, weight) {
+      t += dt;
+      if (weight <= 0.001 || !chans.length) return;
+      for (const c of chans) {
+        _q.copy(c.rest);
+        for (const s of c.spec) {
+          const a = Math.sin((t / s.period + s.phase) * Math.PI * 2) * s.amp * D;
+          _t.setFromAxisAngle(_AX[s.ax], a);
+          _q.multiply(_t);                  // 後乘 = 繞骨頭自己的軸
+        }
+        c.bone.quaternion.slerp(_q, weight);
+      }
+    },
+  };
+}
+
+// 停下來時，把 clip 的時間平滑帶回第 0 格（接觸姿勢）當站姿。
+// 直接 pause 會凍在走到一半的任意一格 —— 半舉著腿，一看就知道沒做待機。
+// 回傳 true = 已經收好了，呼叫端可以不用再管。
+function settleClip(action, dt, k = 9) {
+  const d = action.getClip().duration;
+  const target = action.time > d * 0.5 ? d : 0;   // 就近收，不要倒著跑完整圈
+  action.time += (target - action.time) * (1 - Math.exp(-dt * k));
+  action.paused = true;                            // 暫停的 action 仍然會套用目前的 time
+  if (Math.abs(target - action.time) < 0.005) { action.time = 0; return true; }
+  return false;
+}
+
+// ===== ant-core.js 結束 =====
+
+
+
+const BASE = './';
+const MODELS = { walk: BASE + 'hell_ant_walk.glb' };
+
+const DEBUG = new URLSearchParams(location.search).has('debug');
+
+// ---------------------------------------------------------------- 遊戲常數
+// 全部是世界單位／秒。螞蟻體長 1.7069，所以 1 單位 ≈ 0.59 個體長。
+// 速度 = 步幅 / 循環秒數，所以調快循環就是調快步頻，腳不會打滑。
+// 展示頁用 1.00 s（慕度），遊戲用 0.70 s —— 不然光走路就吃掉大半的 60 秒。
+const CYCLE_SEC = 0.70;                                // 一個走路循環幾秒
+const ANT_SPEED = STRIDE_PER_CYCLE / CYCLE_SEC;        // 0.623 單位/秒
+const ANT_BACK = 0.55;                                 // 後退是倒放，放慢一點
+const TURN_DEG = 130;                                  // 比展示頁的 90°/s 快，遊戲要跟手
+const ARENA_R = 5.0;                                   // 圓形場地半徑
+
+const PREY_N = 6;
+const PREY_R = 0.105;                                  // 視覺半徑（長軸 0.147）
+const CATCH_R = 0.15;                                  // 大顎尖端中點到跳蟲中心的判定距離
+const PREY_WANDER = 0.22;                              // 平常閒晃
+const PREY_WARY = 0.26;                                // 螞蟻靠近時慢慢退
+const PREY_DART = 1.05;                                // 彈開（比螞蟻快 2.4 倍）
+const PREY_TIRED = 0.05;                               // 彈完喘一下 —— 這是第二次機會
+const WARY_R = 0.95;                                   // 進到這個距離就開始戒備
+const DETECT_R = 1.3;                                  // 咬出去時，這個範圍內的跳蟲會察覺
+const REACT = 0.12;                                    // 察覺到彈開之間的反應時間
+const DART_SEC = 0.45;
+const TIRED_SEC = 0.60;
+// 彈跳：跳蟲（springtail）靠腹部的彈器彈走，所以這不是隨便加的機制。
+// 彈之前有 0.22 秒的蓄力（壓扁）—— 這是給玩家看的預告，
+// 因為咬合要 0.14 秒才夾得到，看到蓄力才按就來不及了。
+const HOP_MIN = 1.8;
+const HOP_MAX = 3.6;
+const HOP_TELL = 0.22;                                 // 蓄力
+const HOP_SEC = 0.16;
+const HOP_SPEED = 2.30;                                // 0.16 s × 2.30 = 飛 0.37 單位
+const HOP_ARC = 0.14;                                  // 彈起來的最高點
+
+const GAME_SEC = 60;
+const COMBO_MAX = 5;
+const BEST_KEY = 'hellant.bite.best';
+
+// ---------------------------------------------------------------- DOM
+const $ = (id) => document.getElementById(id);
+const els = {
+  score: $('score'), combo: $('combo'), time: $('time'), best: $('best'),
+  bar: $('bar'), barHead: $('bar-head'), flash: $('flash'),
+  dpad: $('dpad'), bitepad: $('bitepad'), biteBtn: $('bite-btn'),
+  overlay: $('overlay'), start: $('start'), status: $('status'),
+};
+
+let statusTimer = 0;
+function status(msg, isError = false) {
+  els.status.textContent = msg;
+  els.status.classList.toggle('error', isError);
+  els.status.classList.add('show');
+  clearTimeout(statusTimer);
+  if (!isError) statusTimer = setTimeout(() => els.status.classList.remove('show'), 2400);
+}
+
+// ---------------------------------------------------------------- 場景
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.NoToneMapping;   // 要讓色票的 hex 原封不動打到畫面上
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(WORLD_BG);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 100);
+
+const sun = new THREE.DirectionalLight(0xffffff, 1);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun, sun.target);
+
+// 光源方向 = Blender 的 PreviewSun（仰角 30°、方位 30°）
+function lightDirection(elevDeg, azimDeg) {
+  const e = THREE.MathUtils.degToRad(elevDeg);
+  const a = THREE.MathUtils.degToRad(azimDeg);
+  const h = Math.cos(e);
+  return new THREE.Vector3(h * Math.sin(a), Math.sin(e), h * Math.cos(a));
+}
+const SUN_DIR = lightDirection(30, 30);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.ShaderMaterial({
+    name: 'Ground',
+    vertexShader: GROUND_VERT,
+    fragmentShader: GROUND_FRAG,
+    lights: true,
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.lights,
+      {
+        uGroundLit: { value: new THREE.Color(GROUND_LIT) },
+        uGroundK: { value: GROUND_K },
+        uGroundThr: { value: 0.5 },
+      },
+    ]),
+  })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+ground.scale.set(ARENA_R * 3, ARENA_R * 3, 1);
+scene.add(ground);
+
+// ---------------------------------------------------------------- 螞蟻
+const loader = new GLTFLoader();
+let ant = null;
+let mixer = null;
+let action = null;
+const antMaterials = [];
+const mandibles = [];         // { bone, rest }
+const tipMarkers = [];        // 掛在大顎骨頭上的空物件，位置 = 量到的尖端
+let eyeMesh = null;
+let eyeMaterial = null;
+const outlineMats = [];
+let bodyRadius = 1;
+let idle = null;
+// 待機權重：停下來 0.35 s 淡入，起步 0.18 s 淡出。
+// 起步快一點，不然按下前進還會看到觸角在慢慢收。
+let idleW = 0;
+
+async function loadAnt() {
+  status('載入中…');
+  const gltf = await loader.loadAsync(MODELS.walk);
+  ant = gltf.scene;
+
+  const seen = new Map();
+  ant.traverse((o) => {
+    if (!o.isMesh) return;
+    const src = o.material;
+    if (src.name === 'Ant_Hi') { o.visible = false; return; }   // 眼白，真螞蟻沒有
+    if (!seen.has(src.uuid)) {
+      const m = makeMaterial(src.name, THREE.FrontSide);
+      m.uniforms.uLightDir.value.copy(SUN_DIR);
+      seen.set(src.uuid, m);
+      antMaterials.push(m);
+    }
+    o.material = seen.get(src.uuid);
+    if (src.name === 'Ant_Eye') { eyeMesh = o; eyeMaterial = o.material; }
+    o.frustumCulled = false;      // 蒙皮後的包圍盒不準
+    o.castShadow = true;
+    o.receiveShadow = true;
+  });
+
+  // 即時描邊：每塊網格複製一份，綁同一副骨架，BackSide + 沿法線外推固定像素
+  const src = [];
+  ant.traverse((o) => { if (o.isMesh && o.visible) src.push(o); });
+  for (const o of src) {
+    const mat = makeOutlineMaterial();
+    const clone = o.isSkinnedMesh ? new THREE.SkinnedMesh(o.geometry, mat) : new THREE.Mesh(o.geometry, mat);
+    if (o.isSkinnedMesh) clone.bind(o.skeleton, o.bindMatrix);
+    clone.frustumCulled = false;
+    clone.castShadow = false;     // 外殼比本體大一圈，會投出大一圈的影子
+    clone.receiveShadow = false;
+    o.parent.add(clone);
+    outlineMats.push(mat);
+  }
+
+  // 大顎 + 判定點。MANDIBLE_TIP 是量出來的骨頭本地座標，
+  // 掛成骨頭的子物件之後，它的 matrixWorld 就跟著大顎擺動。
+  ant.traverse((o) => {
+    if (!o.isBone) return;
+    const m = MANDIBLE_RE.exec(o.name);
+    if (!m) return;
+    mandibles.push({ bone: o, rest: o.quaternion.clone() });
+    const tip = new THREE.Object3D();
+    tip.position.copy(MANDIBLE_TIP[m[1].toUpperCase()]);
+    o.add(tip);
+    tipMarkers.push(tip);
+    if (DEBUG) {
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.02, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0xff2266 })
+      );
+      tip.add(dot);
+    }
+  });
+
+  const box = new THREE.Box3().setFromObject(ant);
+  bodyRadius = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
+  ground.position.y = box.min.y;
+
+  // 陰影視錐比展示頁放寬一點（1.15 → 1.8 倍），讓靠近的跳蟲也有影子。
+  // texel 從 0.00151 變 0.00237，腿的影子還是乾淨的。
+  const c = sun.shadow.camera;
+  c.left = -bodyRadius * 1.8; c.right = bodyRadius * 1.8;
+  c.top = bodyRadius * 1.8;   c.bottom = -bodyRadius * 1.8;
+  c.near = bodyRadius * 0.5;  c.far = bodyRadius * 8;
+  c.updateProjectionMatrix();
+  sun.shadow.normalBias = bodyRadius * 0.002;
+
+  idle = makeIdle(ant);
+  scene.add(ant);
+
+  // 走路 clip：扣掉匯出器多出來的 1/24 s 定格，並拔掉 Root 位移（改由程式推進）
+  const clip = gltf.animations[0].clone();
+  for (const t of clip.tracks) for (let i = 0; i < t.times.length; i++) t.times[i] -= 1 / FPS;
+  clip.resetDuration();
+  clip.tracks = clip.tracks.filter((t) => t.name !== ROOT_TRACK);
+  mixer = new THREE.AnimationMixer(ant);
+  action = mixer.clipAction(clip);
+  action.play();
+  mixer.timeScale = clip.duration / CYCLE_SEC;
+
+  status('準備好了');
+}
+
+// ---------------------------------------------------------------- 跳蟲
+// 一顆壓扁的橢球就夠讀了。描邊材質要讀 COLOR_0.b 當 HullW，
+// 所以得補一個全 1 的頂點色 —— 沒有這個屬性的話 WebGL 會給 (0,0,0,1)，
+// vColor.b = 0 就完全不描邊。
+const preyGeo = new THREE.SphereGeometry(1, 18, 12);
+preyGeo.scale(PREY_R, PREY_R * 0.78, PREY_R * 1.4);
+preyGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(preyGeo.attributes.position.count * 4).fill(1), 4));
+
+const preyMat = makeMaterial('Prey_Body', THREE.FrontSide);
+preyMat.uniforms.uLightDir.value.copy(SUN_DIR);
+const preyOutlineMat = makeOutlineMaterial(PALETTE.Prey_Outline[0]);
+preyOutlineMat.uniforms.uOutlinePx.value = 3.0;   // 跟螺蟻同寬，風格才一致
+
+const preys = [];
+
+function spawnPrey(awayFrom) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(preyGeo, preyMat);
+  body.castShadow = true;
+  body.receiveShadow = true;
+  const out = new THREE.Mesh(preyGeo, preyOutlineMat);
+  g.add(body, out);
+  g.position.y = ground.position.y + PREY_R * 0.68;
+  scene.add(g);
+
+  const p = { obj: g, baseY: g.position.y, heading: 0, state: 'calm', timer: 0,
+              react: -1, speed: PREY_WANDER, hopIn: 0, hopT: 0 };
+  placePrey(p, awayFrom);
+  preys.push(p);
+  return p;
+}
+
+// 生在場地內、離螞蟻至少 2 個單位的地方，免得一出生就被咬
+function placePrey(p, awayFrom) {
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * (ARENA_R - 0.6);
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (!awayFrom || (x - awayFrom.x) ** 2 + (z - awayFrom.z) ** 2 > 4) {
+      p.obj.position.x = x;
+      p.obj.position.z = z;
+      break;
+    }
+  }
+  p.heading = Math.random() * Math.PI * 2;
+  p.state = 'calm';
+  p.timer = 0.8 + Math.random() * 2;
+  p.react = -1;
+  p.speed = PREY_WANDER;
+  p.hopIn = HOP_MIN + Math.random() * (HOP_MAX - HOP_MIN);
+  p.obj.position.y = p.baseY;
+  p.obj.scale.set(1, 1, 1);
+}
+
+const _toAnt = new THREE.Vector3();
+function updatePrey(dt) {
+  for (const p of preys) {
+    const o = p.obj;
+    _toAnt.set(antPos.x - o.position.x, 0, antPos.z - o.position.z);
+    const d = _toAnt.length();
+
+    // 反應計時：咬出去 REACT 秒後才彈開
+    if (p.react >= 0) {
+      p.react -= dt;
+      if (p.react <= 0) {
+        p.react = -1;
+        p.state = 'dart';
+        p.timer = DART_SEC;
+        p.speed = PREY_DART;
+        p.hopIn = HOP_MIN + Math.random() * (HOP_MAX - HOP_MIN);
+        // 背對螞蟻彈開，加一點隨機，不然每次都同一條線
+        p.heading = Math.atan2(-_toAnt.x, -_toAnt.z) + (Math.random() - 0.5) * 1.4;
+      }
+    }
+
+    p.timer -= dt;
+
+    // 彈跳倒數（蓄力、彈開、彈跳中不計）
+    if (p.state === 'calm' || p.state === 'wary') {
+      p.hopIn -= dt;
+      if (p.hopIn <= 0) { p.state = 'crouch'; p.timer = HOP_TELL; p.speed = 0; }
+    }
+    if (p.state === 'crouch' && p.timer <= 0) {
+      p.state = 'hop'; p.timer = HOP_SEC; p.speed = HOP_SPEED; p.hopT = 0;
+      // 螺蟻越近就越傾向背對著彈，遠的時候隨便彈
+      const away = Math.atan2(-_toAnt.x, -_toAnt.z);
+      const bias = d < 2 ? 1 - d / 2 : 0;
+      p.heading += (away - p.heading) * bias + (Math.random() - 0.5) * 2.4 * (1 - bias);
+    } else if (p.state === 'hop' && p.timer <= 0) {
+      p.state = 'calm'; p.speed = PREY_WANDER;
+      p.timer = 0.8 + Math.random();
+      p.hopIn = HOP_MIN + Math.random() * (HOP_MAX - HOP_MIN);
+    } else if (p.state === 'dart' && p.timer <= 0) {
+      p.state = 'tired'; p.timer = TIRED_SEC; p.speed = PREY_TIRED;
+    } else if (p.state === 'tired' && p.timer <= 0) {
+      p.state = 'calm'; p.timer = 1.0 + Math.random() * 2; p.speed = PREY_WANDER;
+    } else if (p.state === 'calm') {
+      if (d < WARY_R) {
+        p.state = 'wary'; p.speed = PREY_WARY;
+        p.heading = Math.atan2(-_toAnt.x, -_toAnt.z) + (Math.random() - 0.5) * 0.8;
+        p.timer = 0.5;
+      } else if (p.timer <= 0) {
+        p.heading += (Math.random() - 0.5) * 2.1;
+        p.timer = 1.2 + Math.random() * 1.8;
+      }
+    } else if (p.state === 'wary' && p.timer <= 0) {
+      if (d > WARY_R * 1.4) { p.state = 'calm'; p.speed = PREY_WANDER; p.timer = 1.0; }
+      else { p.heading = Math.atan2(-_toAnt.x, -_toAnt.z) + (Math.random() - 0.5) * 0.8; p.timer = 0.4; }
+    }
+
+    o.position.x += Math.sin(p.heading) * p.speed * dt;
+    o.position.z += Math.cos(p.heading) * p.speed * dt;
+
+    // 撞到場地邊界就往圓心折回
+    const rr = Math.hypot(o.position.x, o.position.z);
+    if (rr > ARENA_R - 0.3) {
+      p.heading = Math.atan2(-o.position.x, -o.position.z) + (Math.random() - 0.5) * 0.6;
+      o.position.x *= (ARENA_R - 0.31) / rr;
+      o.position.z *= (ARENA_R - 0.31) / rr;
+    }
+
+    o.rotation.y = p.heading;
+
+    if (p.state === 'hop') {
+      p.hopT += dt;
+      const u = Math.min(1, p.hopT / HOP_SEC);
+      o.position.y = p.baseY + Math.sin(Math.PI * u) * HOP_ARC;
+      o.scale.set(0.92, 1.12, 1.24);          // 在空中拉長
+    } else if (p.state === 'crouch') {
+      o.position.y = p.baseY;
+      o.scale.set(1.16, 0.62, 1.05);          // 蓄力：壓扁，這就是預告
+    } else {
+      o.position.y = p.baseY;
+      o.scale.set(1, 1, p.state === 'dart' ? 1.18 : 1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- 操控
+const KEYS = { ArrowUp: 0, ArrowDown: 0, ArrowLeft: 0, ArrowRight: 0 };
+const WSAD = { KeyW: 'ArrowUp', KeyS: 'ArrowDown', KeyA: 'ArrowLeft', KeyD: 'ArrowRight' };
+const keyName = (e) => (e.key in KEYS ? e.key : WSAD[e.code] || null);
+
+const biter = makeBiter();
+let heading = 0;
+const antPos = new THREE.Vector3();
+
+function tryBite() {
+  if (state !== 'play' || biter.active) return;    // 咬到一半不能再按，連打沒有好處
+  biter.start();
+  lastHits = hits;                                // 咬下去的那一刻記命中數，收尾時比對
+  // 跳蟲在「開始咬」的瞬間察覺，REACT 秒後彈開
+  for (const p of preys) {
+    const d = Math.hypot(p.obj.position.x - antPos.x, p.obj.position.z - antPos.z);
+    if (d < DETECT_R && p.state !== 'dart') p.react = REACT;
+  }
+}
+
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); tryBite(); return; }
+  if (e.code === 'Enter' && state !== 'play') { e.preventDefault(); startGame(); return; }
+  const k = keyName(e);
+  if (!k) return;
+  KEYS[k] = 1;
+  e.preventDefault();
+});
+addEventListener('keyup', (e) => { const k = keyName(e); if (k) KEYS[k] = 0; });
+addEventListener('blur', () => { for (const k in KEYS) KEYS[k] = 0; releaseAll(); });
+
+const dpadBtns = [...document.querySelectorAll('.dpad-btn')];
+function releaseAll() { for (const b of dpadBtns) b.classList.remove('active'); }
+for (const btn of dpadBtns) {
+  const key = btn.dataset.key;
+  const press = (e) => {
+    e.preventDefault();
+    KEYS[key] = 1;
+    btn.classList.add('active');
+    try { btn.setPointerCapture(e.pointerId); } catch { /* 有些瀏覽器不支援 */ }
+  };
+  const release = (e) => { e.preventDefault(); KEYS[key] = 0; btn.classList.remove('active'); };
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave', release);
+}
+els.biteBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); tryBite(); });
+
+// ---------------------------------------------------------------- 遊戲狀態
+let state = 'menu';            // menu | play | over
+let score = 0;
+let combo = 1;
+let timeLeft = GAME_SEC;
+let best = Number(localStorage.getItem(BEST_KEY) || 0) || 0;
+let bites = 0;
+let hits = 0;
+
+els.best.textContent = String(best);
+
+function bump(el) {
+  el.classList.remove('bump');
+  void el.offsetWidth;          // 強制重排，動畫才會重播
+  el.classList.add('bump');
+}
+
+function flash(kind) {
+  els.flash.className = kind;
+  setTimeout(() => { els.flash.className = ''; }, 30);
+}
+
+function startGame() {
+  score = 0; combo = 1; timeLeft = GAME_SEC; bites = 0; hits = 0;
+  state = 'play';
+  heading = 0;
+  if (ant) { ant.position.set(0, 0, 0); ant.rotation.y = 0; }
+  antPos.set(0, 0, 0);
+  for (const p of preys) placePrey(p, antPos);
+  while (preys.length < PREY_N) spawnPrey(antPos);
+  els.score.textContent = '0';
+  els.combo.textContent = '×1';
+  els.time.textContent = GAME_SEC.toFixed(1);
+  els.time.classList.remove('low');
+  els.overlay.hidden = true;
+  els.bar.hidden = false;
+  els.dpad.hidden = false;
+  els.bitepad.hidden = false;
+}
+
+function endGame() {
+  state = 'over';
+  els.bar.hidden = true;
+  const isBest = score > best;
+  if (isBest) { best = score; localStorage.setItem(BEST_KEY, String(best)); els.best.textContent = String(best); }
+  const acc = bites ? Math.round((hits / bites) * 100) : 0;
+  els.overlay.querySelector('.card').innerHTML =
+    '<p class="result">' + score + '</p>' +
+    '<p class="sub">' + (isBest ? '新紀錄！　' : '最佳 ' + best + '　') +
+    '咬了 ' + bites + ' 次，命中 ' + hits + ' 次（' + acc + '%）</p>' +
+    '<table class="keys">' +
+    '<tr><td>太早按</td><td>大顎還在往下張，撲空</td></tr>' +
+    '<tr><td>太晚按</td><td>跳蟲已經彈開 —— 牠比你快 2.4 倍</td></tr>' +
+    '<tr><td>訣竅</td><td>等牠「喘氣」那 0.6 秒</td></tr>' +
+    '</table>' +
+    '<button type="button" id="start">再來一次</button>';
+  els.overlay.querySelector('#start').addEventListener('click', startGame);
+  els.overlay.hidden = false;
+}
+
+els.start.addEventListener('click', startGame);
+
+// ---------------------------------------------------------------- 每格更新
+const _mq = new THREE.Quaternion();
+function updateMandibles(dt) {
+  if (!mandibles.length) return;
+  const rad = THREE.MathUtils.degToRad(MANDIBLE_OPEN_DEG) * biter.amount(dt, 0);
+  for (const m of mandibles) {
+    _mq.setFromAxisAngle(MANDIBLE_AXIS, rad);
+    m.bone.quaternion.copy(m.rest).multiply(_mq);   // 後乘 = 繞骨頭自己的軸
+  }
+}
+
+let settled = false;
+function updateWalk(dt) {
+  if (!ant || !action) return;
+  const turn = THREE.MathUtils.degToRad(TURN_DEG) * dt;
+  heading += (KEYS.ArrowLeft - KEYS.ArrowRight) * turn;
+  ant.rotation.y = heading;
+
+  const dir = KEYS.ArrowUp - KEYS.ArrowDown;
+  if (dir !== 0) {
+    const v = ANT_SPEED * (dir > 0 ? 1 : ANT_BACK);
+    ant.position.x += Math.sin(heading) * v * dir * dt;
+    ant.position.z += Math.cos(heading) * v * dir * dt;
+    // 走出場地就貼著邊界
+    const r = Math.hypot(ant.position.x, ant.position.z);
+    if (r > ARENA_R) { ant.position.x *= ARENA_R / r; ant.position.z *= ARENA_R / r; }
+    action.paused = false;
+    settled = false;
+    mixer.timeScale = Math.abs(mixer.timeScale) * (dir < 0 ? -1 : 1);
+  } else if (!settled) {
+    settled = settleClip(action, dt);
+  }
+  antPos.copy(ant.position);
+}
+
+// 判定：只在「往上甩」那一段（segment 1，60 毫秒）算數
+const _tipA = new THREE.Vector3();
+const _tipB = new THREE.Vector3();
+const _bitePoint = new THREE.Vector3();
+function updateCatch() {
+  if (state !== 'play') return;
+  if (biter.segment !== 1) return;
+  if (tipMarkers.length < 2) return;
+
+  tipMarkers[0].getWorldPosition(_tipA);
+  tipMarkers[1].getWorldPosition(_tipB);
+  _bitePoint.addVectors(_tipA, _tipB).multiplyScalar(0.5);
+
+  for (const p of preys) {
+    const d = Math.hypot(p.obj.position.x - _bitePoint.x, p.obj.position.z - _bitePoint.z);
+    if (d > CATCH_R) continue;
+    hits++;
+    score += combo;
+    combo = Math.min(COMBO_MAX, combo + 1);
+    els.score.textContent = String(score);
+    els.combo.textContent = '×' + combo;
+    bump(els.score);
+    flash('hit');
+    placePrey(p, antPos);
+    return;                      // 一次咬一隻
+  }
+}
+
+// 咬完一整輪都沒中 → 斷連擊
+let lastHits = 0;
+// wasActive 在每格開頭取樣，所以只能拿來偵測「結束」那一邊——
+// 開始那一格 biter 已經是 active（tryBite 在這一格之前就跑了），偵測不到上升沿。
+function updateBiteBookkeeping(wasActive) {
+  if (wasActive && !biter.active) {                     // 一整輪跑完了
+    bites++;
+    if (hits === lastHits) { combo = 1; els.combo.textContent = '×1'; flash('miss'); }
+  }
+}
+
+// 節奏條：把包絡的進度畫出來，玩家看得到自己按得準不準
+const BAR_TOTAL = 0.40;
+function updateBar() {
+  if (state !== 'play') return;
+  if (!biter.active) { els.barHead.style.opacity = '0'; return; }
+  els.barHead.style.opacity = '1';
+  els.barHead.style.left = (biter.time / BAR_TOTAL * 100).toFixed(1) + '%';
+  els.biteBtn.classList.toggle('armed', biter.segment === 1);
+}
+
+// 陰影視錐只有 4.85 單位寬，必須跟著螞蟻走，不然走出去影子就沒了
+const _sunAt = new THREE.Vector3();
+function followSun() {
+  if (!ant) return;
+  _sunAt.copy(ant.position);
+  _sunAt.y = ground.position.y + bodyRadius * 0.5;
+  sun.position.copy(_sunAt).addScaledVector(SUN_DIR, bodyRadius * 4);
+  sun.target.position.copy(_sunAt);
+  sun.target.updateMatrixWorld();
+}
+
+// 追尾相機：固定在螞蟻正後方偏上，用指數阻尼跟過去
+// 高度 2.50 / 後退 3.40 => 俯角 36.3°。
+// 太低看不到跳蟲跟螺蟻的距離，太高就變成俯瞰圖、大顎的擺動看不出來。
+const CAM_BACK = 3.40;
+const CAM_UP = 2.50;
+const CAM_LOOK = 1.10;
+const _camWant = new THREE.Vector3();
+const _lookWant = new THREE.Vector3();
+const _look = new THREE.Vector3();
+let lookInit = false;
+function updateCamera(dt) {
+  if (!ant) return;
+  const s = Math.sin(heading), c = Math.cos(heading);
+  _camWant.set(ant.position.x - s * CAM_BACK, ground.position.y + CAM_UP, ant.position.z - c * CAM_BACK);
+  _lookWant.set(ant.position.x + s * CAM_LOOK, ground.position.y + 0.12, ant.position.z + c * CAM_LOOK);
+  if (!lookInit) { camera.position.copy(_camWant); _look.copy(_lookWant); lookInit = true; }
+  const k = 1 - Math.exp(-dt * 4.5);
+  camera.position.lerp(_camWant, k);
+  _look.lerp(_lookWant, k);
+  camera.lookAt(_look);
+}
+
+// 眼睛的解析高光整組在物件空間算，所以每格要把相機與光方向換算進去
+const _camObj = new THREE.Vector3();
+const _lightObj = new THREE.Vector3();
+const _nm = new THREE.Matrix3();
+function updateEyeSpace() {
+  if (!eyeMesh || !eyeMaterial) return;
+  eyeMesh.updateWorldMatrix(true, false);
+  _camObj.copy(camera.position);
+  eyeMesh.worldToLocal(_camObj);
+  _nm.setFromMatrix4(eyeMesh.matrixWorld).invert();
+  _lightObj.copy(SUN_DIR).applyMatrix3(_nm).normalize();
+  eyeMaterial.uniforms.uCamObj.value.copy(_camObj);
+  eyeMaterial.uniforms.uLightObj.value.copy(_lightObj);
+}
+
+// 描邊寬度鎖成固定像素：每像素的世界長度 = 2 * 視深 * tan(fov/2) / 視埠高
+function updateOutlineScale() {
+  const h = Math.max(1, renderer.domElement.height / renderer.getPixelRatio());
+  const scale = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / h;
+  for (const m of outlineMats) m.uniforms.uPxScale.value = scale;
+  preyOutlineMat.uniforms.uPxScale.value = scale;
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------------------------------------------------------------- 主迴圈
+const clock = new THREE.Clock();
+// 抽成独立函式，?debug 下會採到 window.__game.step ——
+// 分頁不在前景時瀏覽器會把 rAF 停掉，這時只能手動推進來驗證邏輯。
+function frame(dt) {
+  const wasBiting = biter.active;
+
+  if (mixer) mixer.update(dt);
+  // 以下兩行一定要在 mixer.update() 之後 —— 否則會被混合器寫回去
+  if (idle) {
+    const want = (state === 'play' && (KEYS.ArrowUp || KEYS.ArrowDown)) ? 0 : 1;
+    idleW += (want - idleW) * (1 - Math.exp(-dt * (want > idleW ? 6 : 12)));
+    idle.update(dt, idleW);
+  }
+  updateMandibles(dt);
+
+  if (state === 'play') {
+    updateWalk(dt);
+    updatePrey(dt);
+    updateCatch();
+    updateBiteBookkeeping(wasBiting);
+    timeLeft -= dt;
+    els.time.textContent = Math.max(0, timeLeft).toFixed(1);
+    els.time.classList.toggle('low', timeLeft <= 10);
+    if (timeLeft <= 0) endGame();
+  } else {
+    updateBiteBookkeeping(wasBiting);
+  }
+
+  updateBar();
+  followSun();
+  updateCamera(dt);
+  updateEyeSpace();
+  updateOutlineScale();
+  renderer.render(scene, camera);
+}
+
+renderer.setAnimationLoop(() => frame(Math.min(0.05, clock.getDelta())));   // 切回分頁時不要一次跳一大步
+
+// ---------------------------------------------------------------- 啟動
+loadAnt()
+  .then(() => {
+    for (let i = 0; i < PREY_N; i++) spawnPrey(new THREE.Vector3());
+    updateCamera(1);              // 先擺好相機，開場畫面就看得到螞蟻
+    if (DEBUG) {
+      window.__game = {
+        THREE, scene, ant, preys, biter, camera, mandibles, tipMarkers,
+        step: frame,
+        get state() { return state; },
+        get timeLeft() { return timeLeft; },
+        bite: tryBite,
+        start: startGame,
+      };
+    }
+  })
+  .catch((err) => status('載入失敗：' + err.message, true));
+
+</script>
+</body>
+</html>
